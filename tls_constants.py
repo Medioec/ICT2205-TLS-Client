@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from enum import IntEnum
 import struct
 # https://datatracker.ietf.org/doc/rfc8446/
@@ -34,6 +35,8 @@ struct {
 } TLSCiphertext;
 '''
 
+TLS12_PROTOCOL_VERSION = b'\x03\x03'
+
 class ContentType(IntEnum):
     invalid = 0
     change_cipher_spec = 20
@@ -43,26 +46,71 @@ class ContentType(IntEnum):
     heartbeat = 24
     UNKNOWN = 255
 
+@dataclass
 class TLSPlaintext:
-    def __init__(self, type, legacy_record_version, length, fragment):
-        self.type = type
-        self.legacy_record_version = legacy_record_version
-        self.length = length
-        self.fragment = fragment
+    type: ContentType
+    legacy_record_version = TLS12_PROTOCOL_VERSION #always 0x0303
+    length: int
+    fragment: bytes
 
+    def to_bytes(self) -> bytes:
+        return struct.pack('B', self.type) + self.legacy_record_version + struct.pack("!H", self.length) + self.fragment
+
+    @classmethod
+    def from_bytes(cls, data):
+        type, legacy_ver, length = struct.unpack('!B2sH', data[:5])
+        return cls(type, length, data[5:])
+
+@dataclass
 class TLSInnerPlaintext:
-    def __init__(self, content, type, zeros):
-        self.content = content
-        self.type = type
-        self.zeros = zeros
+    content: bytes
+    type: ContentType
+    zeros: bytes
+    TLS_INNER_SIZE_LIMIT = 0x4001
 
+    def to_bytes(self) -> bytes:
+        if not self.is_valid_length():
+            raise Exception(f"TLSInnerPlaintext exceeds size limit of {self.TLS_INNER_SIZE_LIMIT} bytes.")
+        return self.content + struct.pack('B', type) + self.zeros
+
+    @classmethod
+    def from_bytes(cls, data):
+        n: int
+        type: ContentType
+        for index, byte in reversed(list(enumerate(data))):
+            if byte == b'\x00':
+                continue
+            n = index
+            type = int(byte)
+            break
+        content = data[:n]
+        return cls(content, type, data[n + 1:])
+
+    def is_valid_length(self) -> bool:
+        return len(self.content) + len(self.zeros) + 1 <= self.TLS_INNER_SIZE_LIMIT
+
+#TODO: investigate AEAD expansions
+@dataclass
 class TLSCiphertext:
-    def __init__(self, length, encrypted_record):
-        self.opaque_type = ContentType.application_data
-        self.legacy_record_version = 0x0303
-        self.length = length
-        self.encrypted_record = encrypted_record
+    opaque_type = ContentType.application_data
+    legacy_record_version = TLS12_PROTOCOL_VERSION #always 0x0303
+    length: int
+    encrypted_record: bytes
+    LENGTH_LIMIT = 0x4100
 
+    def to_bytes(self) -> bytes:
+        return struct.pack('B', self.opaque_type) + self.legacy_record_version + struct.pack("!H", self.length) + self.encrypted_record
+
+    @classmethod
+    def from_bytes(cls, data):
+        op_type, legacy_ver, length = struct.unpack('!B2sH', data[:5])
+        ct = cls(op_type, length, data[5:])
+        if not ct.is_valid_length():
+            raise Exception(f"TLSCiphertext excees size limit of {ct.LENGTH_LIMIT} bytes.")
+        return ct
+
+    def is_valid_length(self) -> bool:
+        return self.length < self.LENGTH_LIMIT and len(self.encrypted_record) < self.LENGTH_LIMIT
 
 '''
 B.2.  Alert Messages
