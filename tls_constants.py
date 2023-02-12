@@ -204,7 +204,7 @@ struct {
     };
 } Handshake;
 '''
-class HandshakeType(enum.IntEnum):
+class HandshakeType(IntEnum):
     hello_request_RESERVED = 0
     client_hello = 1
     server_hello = 2
