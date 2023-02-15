@@ -35,7 +35,14 @@ struct {
 } TLSCiphertext;
 '''
 
+TLS10_PROTOCOL_VERSION = b'\x03\x01'
 TLS12_PROTOCOL_VERSION = b'\x03\x03'
+
+TLS_AES_128_GCM_SHA256 = b'\x13\x01'
+TLS_AES_256_GCM_SHA384 = b'\x13\x02'
+TLS_CHACHA20_POLY1305_SHA256 = b'\x13\x03'
+TLS_AES_128_CCM_SHA256 = b'\x13\x04'
+TLS_AES_128_CCM_8_SHA256 = b'\x13\x05'
 
 class ContentType(IntEnum):
     invalid = 0
@@ -49,7 +56,7 @@ class ContentType(IntEnum):
 @dataclass
 class TLSPlaintext:
     type: ContentType
-    legacy_record_version = TLS12_PROTOCOL_VERSION #always 0x0303
+    legacy_record_version = TLS10_PROTOCOL_VERSION #always 0x0301
     length: int
     fragment: bytes
 
@@ -320,14 +327,12 @@ struct {
 } ServerHello;
 '''
 
-PROTOCOL_VERSION = 0x0303
-
 class ClientHello:
-    def __init__(self, random_bytes, cipher_suites, extensions):
-        self.legacy_version = PROTOCOL_VERSION
+    def __init__(self, random_bytes, legacy_session_id, extensions):
+        self.legacy_version = TLS12_PROTOCOL_VERSION
         self.random = random_bytes
-        self.legacy_session_id = b''
-        self.cipher_suites = cipher_suites
+        self.legacy_session_id = legacy_session_id
+        self.cipher_suites = TLS_AES_128_GCM_SHA256 + TLS_AES_256_GCM_SHA384 + TLS_CHACHA20_POLY1305_SHA256 + TLS_AES_128_CCM_SHA256 + TLS_AES_128_CCM_8_SHA256
         self.legacy_compression_methods = b'\x00'
         self.extensions = extensions
 
@@ -337,12 +342,11 @@ class ClientHello:
         legacy_compression_methods = struct.pack('B', len(self.legacy_compression_methods)) + self.legacy_compression_methods
         extensions = struct.pack('!H', len(self.extensions)) + self.extensions
 
-        return struct.pack('!H', self.legacy_version) + self.random + legacy_session_id + cipher_suites + legacy_compression_methods + extensions
-
+        return self.legacy_version + self.random + legacy_session_id + cipher_suites + legacy_compression_methods + extensions
 
 class ServerHello:
     def __init__(self, random_bytes, cipher_suite, extensions):
-        self.legacy_version = PROTOCOL_VERSION
+        self.legacy_version = TLS12_PROTOCOL_VERSION
         self.random = random_bytes
         self.legacy_session_id_echo = b''
         self.cipher_suite = cipher_suite
@@ -380,55 +384,3 @@ class ExtensionType(IntEnum):
     signature_algorithms_cert = 50
     key_share = 51
 
-class KeyShareEntry:
-    def __init__(self, group, key_exchange):
-        self.group = group
-        self.key_exchange = key_exchange
-
-class KeyShareClientHello:
-    def __init__(self, client_shares):
-        self.client_shares = client_shares
-
-class KeyShareHelloRetryRequest:
-    def __init__(self, selected_group):
-        self.selected_group = selected_group
-
-class KeyShareServerHello:
-    def __init__(self, server_share):
-        self.server_share = server_share
-
-class UncompressedPointRepresentation:
-    def __init__(self, X, Y):
-        self.legacy_form = 4
-        self.X = X
-        self.Y = Y
-
-class PskKeyExchangeMode(IntEnum):
-    psk_ke = 0
-    psk_dhe_ke = 1
-
-class PskKeyExchangeModes:
-    def __init__(self, ke_modes):
-        self.ke_modes = ke_modes
-
-class Empty:
-    pass
-
-class EarlyDataIndication:
-    def __init__(self, max_early_data_size=None):
-        self.max_early_data_size = max_early_data_size
-
-class PskIdentity:
-    def __init__(self, identity, obfuscated_ticket_age):
-        self.identity = identity
-        self.obfuscated_ticket_age = obfuscated_ticket_age
-
-class OfferedPsks:
-    def __init__(self, identities, binders):
-        self.identities = identities
-        self.binders = binders
-
-class PreSharedKeyExtension:
-    def __init__(self, offered_psks=None, selected_identity=None):
-        self.offered_psks = offered_psks
-        self.selected_identity = selected_identity
