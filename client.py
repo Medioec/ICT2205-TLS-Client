@@ -66,11 +66,22 @@ def main():
             tlspt_clienthello = tls.TLSPlaintext(tls.ContentType.handshake, tls.TLS10_PROTOCOL_VERSION, len(handshake.to_bytes()), handshake.to_bytes())
             s.connect((ip, args.port))
             s.sendall(tlspt_clienthello.to_bytes())
+            res, data = parse_server_hello(s)
         except socket.gaierror:
             # this means could not resolve the host
             print(f'Could not find host {args.hostname}')
     return
 
+def parse_server_hello(clienthello: tls.ClientHello, s: socket.socket):
+    data = s.recv()
+    recordlayer = tls.TLSRecordLayer.parse_records(data)
+    handshake = recordlayer.parse_handshake()
+    if handshake.server_hello == None:
+        return
+    res = check_server_hello(handshake.server_hello, clienthello)
+
+def check_server_hello(serverhello: tls.ServerHello, clienthello: tls.ClientHello):
+    return
 
 if __name__ == '__main__':
     main()

@@ -24,13 +24,36 @@ class ContentType(IntEnum):
     application_data: int = 23
     heartbeat: int = 24
     max_value: int = 255
-
-
 @dataclass
-class TLSPlaintext:
+class TLSRecord:
     type: ContentType
     legacy_record_version: int
     length: int
+@dataclass
+class TLSRecordLayer:
+    records: list[TLSRecord] = None
+    
+    @classmethod
+    def parse_records(cls, data: bytes):
+        startbyte = 0
+        records = list()
+        while startbyte < len(data):
+            type, version, length = struct.unpack("!BHH", data)
+            if type == ContentType.application_data:
+                records.append(TLSCiphertext.from_bytes(data[startbyte:startbyte + length]))
+            else:
+                records.append(TLSPlaintext.from_bytes(data[startbyte:startbyte + length]))
+            startbyte += length + 5
+        return cls(records)
+    
+    def parse_handshake(self):
+        for record in self.records:
+            if record.type == ContentType.handshake:
+                handshake = Handshake.from_bytes(record.fragments)
+                return handshake
+                
+@dataclass
+class TLSPlaintext(TLSRecord):
     fragment: bytes
 
     def to_bytes(self):
@@ -62,14 +85,11 @@ class TLSInnerPlaintext:
 
 
 @dataclass
-class TLSCiphertext:
-    opaque_type: ContentType
-    legacy_record_version: int
-    length: int
+class TLSCiphertext(TLSRecord):
     encrypted_record: bytes
 
     def to_bytes(self):
-        return struct.pack('!BH', self.opaque_type.value, self.legacy_record_version) + struct.pack('!H', self.length) + self.encrypted_record
+        return struct.pack('!BH', self.type.value, self.legacy_record_version) + struct.pack('!H', self.length) + self.encrypted_record
 
     @classmethod
     def from_bytes(cls, data: bytes):
@@ -267,8 +287,6 @@ class ServerHello:
             1, "big")
         extensions_length_bytes = len(self.extensions).to_bytes(2, "big")
         return legacy_version_bytes + self.random + legacy_session_id_echo_length_bytes + self.legacy_session_id_echo + self.cipher_suite + bytes([self.legacy_compression_method]) + extensions_length_bytes + self.extensions
-
-
 
 @dataclass
 class Extension:
