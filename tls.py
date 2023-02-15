@@ -7,14 +7,20 @@ TLS10_PROTOCOL_VERSION = 0x0301
 TLS11_PROTOCOL_VERSION = 0x0302
 TLS12_PROTOCOL_VERSION = 0x0303
 TLS13_PROTOCOL_VERSION = 0x0304
-TLS_ALL_VERSIONS = [TLS10_PROTOCOL_VERSION, TLS11_PROTOCOL_VERSION, TLS12_PROTOCOL_VERSION, TLS13_PROTOCOL_VERSION]
+TLS_ALL_VERSIONS = [
+    TLS10_PROTOCOL_VERSION,
+    TLS11_PROTOCOL_VERSION,
+    TLS12_PROTOCOL_VERSION,
+    TLS13_PROTOCOL_VERSION,
+]
 
 TLS_AES_128_GCM_SHA256 = 0x1301
 TLS_AES_256_GCM_SHA384 = 0x1302
 TLS_CHACHA20_POLY1305_SHA256 = 0x1303
 TLS_AES_128_CCM_SHA256 = 0x1304
 TLS_AES_128_CCM_8_SHA256 = 0x1305
-TLS_EMPTY_RENEGOTIATION_INFO_SCSV = 0x00ff
+TLS_EMPTY_RENEGOTIATION_INFO_SCSV = 0x00FF
+
 
 class ContentType(IntEnum):
     invalid: int = 0
@@ -24,46 +30,65 @@ class ContentType(IntEnum):
     application_data: int = 23
     heartbeat: int = 24
     max_value: int = 255
+
+
 @dataclass
 class TLSRecord:
     type: ContentType
     legacy_record_version: int
     length: int
+
+
 @dataclass
 class TLSRecordLayer:
     records: list[TLSRecord] = None
-    
+
     @classmethod
     def parse_records(cls, data: bytes):
         startbyte = 0
         records = list()
         while startbyte < len(data):
-            type, version, length = struct.unpack("!BHH", data)
+            type, version, length = struct.unpack(
+                "!BHH", data[startbyte : startbyte + 5]
+            )
+            tmp = data[startbyte : startbyte + 5 + length]
             if type == ContentType.application_data:
-                records.append(TLSCiphertext.from_bytes(data[startbyte:startbyte + length]))
+                records.append(TLSCiphertext.from_bytes(tmp))
             else:
-                records.append(TLSPlaintext.from_bytes(data[startbyte:startbyte + length]))
+                records.append(TLSPlaintext.from_bytes(tmp))
             startbyte += length + 5
         return cls(records)
-    
+
     def parse_handshake(self):
+        handshake: Handshake = None
         for record in self.records:
             if record.type == ContentType.handshake:
                 handshake = Handshake.from_bytes(record.fragments)
                 return handshake
-                
+
+    def parse_alert(self):
+        alert: Alert = None
+        for record in self.records:
+            if isinstance(record, TLSPlaintext) and record.type == ContentType.alert:
+                alert = Alert.from_bytes(record.fragment)
+                return alert
+
 @dataclass
 class TLSPlaintext(TLSRecord):
     fragment: bytes
 
     def to_bytes(self):
-        return struct.pack('!BH', self.type.value, self.legacy_record_version) + struct.pack('!H', self.length) + self.fragment
+        return (
+            struct.pack("!BH", self.type.value, self.legacy_record_version)
+            + struct.pack("!H", self.length)
+            + self.fragment
+        )
 
     @classmethod
     def from_bytes(cls, data: bytes):
-        type, legacy_record_version = struct.unpack('!BH', data[:3])
-        length, = struct.unpack('!H', data[3:5])
-        fragment = data[5: 5 + length]
+        type, legacy_record_version = struct.unpack("!BH", data[:3])
+        (length,) = struct.unpack("!H", data[3:5])
+        fragment = data[5 : 5 + length]
         return cls(ContentType(type), legacy_record_version, length, fragment)
 
 
@@ -74,7 +99,7 @@ class TLSInnerPlaintext:
     zeros: bytes
 
     def to_bytes(self):
-        return self.content + struct.pack('!B', self.type.value) + self.zeros
+        return self.content + struct.pack("!B", self.type.value) + self.zeros
 
     @classmethod
     def from_bytes(cls, data: bytes):
@@ -89,14 +114,20 @@ class TLSCiphertext(TLSRecord):
     encrypted_record: bytes
 
     def to_bytes(self):
-        return struct.pack('!BH', self.type.value, self.legacy_record_version) + struct.pack('!H', self.length) + self.encrypted_record
+        return (
+            struct.pack("!BH", self.type.value, self.legacy_record_version)
+            + struct.pack("!H", self.length)
+            + self.encrypted_record
+        )
 
     @classmethod
     def from_bytes(cls, data: bytes):
-        opaque_type, legacy_record_version = struct.unpack('!BH', data[:3])
-        length, = struct.unpack('!H', data[3:5])
-        encrypted_record = data[5: 5 + length]
-        return cls(ContentType(opaque_type), legacy_record_version, length, encrypted_record)
+        opaque_type, legacy_record_version = struct.unpack("!BH", data[:3])
+        (length,) = struct.unpack("!H", data[3:5])
+        encrypted_record = data[5 : 5 + length]
+        return cls(
+            ContentType(opaque_type), legacy_record_version, length, encrypted_record
+        )
 
 
 class AlertLevel(IntEnum):
@@ -147,7 +178,9 @@ class Alert:
     description: AlertDescription
 
     def to_bytes(self):
-        return self.level.value.to_bytes(1, "big") + self.description.value.to_bytes(1, "big")
+        return self.level.value.to_bytes(1, "big") + self.description.value.to_bytes(
+            1, "big"
+        )
 
     @classmethod
     def from_bytes(cls, data):
@@ -183,13 +216,13 @@ class HandshakeType(IntEnum):
 class Handshake:
     msg_type: int
     length: int
-    client_hello: 'ClientHello' = None
-    server_hello: 'ServerHello' = None
+    client_hello: "ClientHello" = None
+    server_hello: "ServerHello" = None
 
     @classmethod
     def from_bytes(cls, data: bytes):
-        msg_type, length = struct.unpack('!B3s', data[:4])
-        length = int.from_bytes(length, 'big')
+        msg_type, length = struct.unpack("!B3s", data[:4])
+        length = int.from_bytes(length, "big")
         data = data[4:]
 
         if msg_type == 1:
@@ -199,11 +232,11 @@ class Handshake:
             server_hello = ServerHello.from_bytes(data)
             return cls(msg_type, length, server_hello=server_hello)
         else:
-            raise ValueError(f'Unrecognized msg_type: {msg_type}')
+            raise ValueError(f"Unrecognized msg_type: {msg_type}")
 
     def to_bytes(self):
-        msg_type = struct.pack('!B', self.msg_type)
-        length = struct.pack('!I', self.length)[1:]
+        msg_type = struct.pack("!B", self.msg_type)
+        length = struct.pack("!I", self.length)[1:]
 
         if self.client_hello:
             client_hello = self.client_hello.to_bytes()
@@ -212,7 +245,7 @@ class Handshake:
             server_hello = self.server_hello.to_bytes()
             return msg_type + length + server_hello
         else:
-            raise ValueError('Either client_hello or server_hello must be set')
+            raise ValueError("Either client_hello or server_hello must be set")
 
 
 class ClientHello:
@@ -220,23 +253,32 @@ class ClientHello:
         self.ProtocolVersion = TLS12_PROTOCOL_VERSION
         self.random = random_bytes
         self.legacy_session_id = legacy_session_id
-        self.cipher_suites = [TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256, TLS_AES_128_CCM_SHA256, TLS_AES_128_CCM_8_SHA256, TLS_EMPTY_RENEGOTIATION_INFO_SCSV]
+        self.cipher_suites = [
+            TLS_AES_128_GCM_SHA256,
+            TLS_AES_256_GCM_SHA384,
+            TLS_CHACHA20_POLY1305_SHA256,
+            TLS_AES_128_CCM_SHA256,
+            TLS_AES_128_CCM_8_SHA256,
+            TLS_EMPTY_RENEGOTIATION_INFO_SCSV,
+        ]
         self.legacy_compression_methods = [0x00]
         self.extensions = extensions
 
     @classmethod
     def from_bytes(cls, data: bytes):
-        ProtocolVersion = int.from_bytes(data[:2], byteorder='big')
+        ProtocolVersion = int.from_bytes(data[:2], byteorder="big")
         random = data[2:34]
         legacy_session_id_len = data[34]
-        legacy_session_id = data[35:35+legacy_session_id_len]
+        legacy_session_id = data[35 : 35 + legacy_session_id_len]
         cipher_suites_len = int.from_bytes(
-            data[35+legacy_session_id_len:35+legacy_session_id_len+2], byteorder='big')
+            data[35 + legacy_session_id_len : 35 + legacy_session_id_len + 2],
+            byteorder="big",
+        )
         cipher_suites = []
         start = 35 + legacy_session_id_len + 2
         end = start + cipher_suites_len
         for i in range(start, end, 2):
-            cipher_suites.append(int.from_bytes(data[i:i+2], byteorder='big'))
+            cipher_suites.append(int.from_bytes(data[i : i + 2], byteorder="big"))
         legacy_compression_methods_len = data[end]
         legacy_compression_methods = []
         start = end + 1
@@ -244,64 +286,147 @@ class ClientHello:
         for i in range(start, end):
             legacy_compression_methods.append(data[i])
         extensions = data[end:]
-        return cls(ProtocolVersion, random, legacy_session_id, cipher_suites, legacy_compression_methods, extensions)
+        return cls(
+            ProtocolVersion,
+            random,
+            legacy_session_id,
+            cipher_suites,
+            legacy_compression_methods,
+            extensions,
+        )
 
     def to_bytes(self):
-        protocol_version_bytes = struct.pack('!H', self.ProtocolVersion)
-        legacy_session_id_len_bytes = struct.pack('!B', len(self.legacy_session_id))
-        cipher_suites_len_bytes = struct.pack('!H', len(self.cipher_suites) * 2)
-        cipher_suites_bytes = b''.join([struct.pack('!H', c) for c in self.cipher_suites])
-        legacy_compression_methods_len_bytes = struct.pack('!B', len(self.legacy_compression_methods))
-        legacy_compression_methods_bytes = b''.join([struct.pack('!B', c) for c in self.legacy_compression_methods])
-        extensions_len_bytes = struct.pack('!H', len(self.extensions))
-        return protocol_version_bytes + self.random + legacy_session_id_len_bytes + self.legacy_session_id + cipher_suites_len_bytes + cipher_suites_bytes + legacy_compression_methods_len_bytes + legacy_compression_methods_bytes + extensions_len_bytes + self.extensions
+        protocol_version_bytes = struct.pack("!H", self.ProtocolVersion)
+        legacy_session_id_len_bytes = struct.pack("!B", len(self.legacy_session_id))
+        cipher_suites_len_bytes = struct.pack("!H", len(self.cipher_suites) * 2)
+        cipher_suites_bytes = b"".join(
+            [struct.pack("!H", c) for c in self.cipher_suites]
+        )
+        legacy_compression_methods_len_bytes = struct.pack(
+            "!B", len(self.legacy_compression_methods)
+        )
+        legacy_compression_methods_bytes = b"".join(
+            [struct.pack("!B", c) for c in self.legacy_compression_methods]
+        )
+        extensions_len_bytes = struct.pack("!H", len(self.extensions))
+        return (
+            protocol_version_bytes
+            + self.random
+            + legacy_session_id_len_bytes
+            + self.legacy_session_id
+            + cipher_suites_len_bytes
+            + cipher_suites_bytes
+            + legacy_compression_methods_len_bytes
+            + legacy_compression_methods_bytes
+            + extensions_len_bytes
+            + self.extensions
+        )
+
 
 @dataclass
 class ServerHello:
     legacy_version: int
     random: bytes
+    session_id_length: int
     legacy_session_id_echo: bytes
     cipher_suite: bytes
     legacy_compression_method: int
     extensions: bytes
 
+    def __init__(
+        self,
+        version: int,
+        random: bytes,
+        session_id_length: int,
+        session_id: bytes,
+        cipher_suite: bytes,
+        compression_method: int,
+        extensions: bytes,
+    ):
+        self.legacy_version = version
+        self.random = random
+        self.session_id_length = session_id_length
+        self.legacy_session_id_echo = session_id
+        self.cipher_suite = cipher_suite
+        self.legacy_compression_method = compression_method
+        self.extensions = extensions
+
     @classmethod
     def from_bytes(cls, data: bytes):
-        legacy_version = int.from_bytes(data[:2], "big")
-        random = data[2:34]
-        legacy_session_id_echo_length = data[34]
-        legacy_session_id_echo = data[35:35 + legacy_session_id_echo_length]
-        cipher_suite = data[35 + legacy_session_id_echo_length:37 +
-                            legacy_session_id_echo_length]
-        legacy_compression_method = data[37 + legacy_session_id_echo_length]
-        extensions_length = int.from_bytes(
-            data[38 + legacy_session_id_echo_length:40 + legacy_session_id_echo_length], "big")
-        extensions = data[40 + legacy_session_id_echo_length: 40 +
-                          legacy_session_id_echo_length + extensions_length]
-        return cls(legacy_version, random, legacy_session_id_echo, cipher_suite, legacy_compression_method, extensions)
+        version, random, session_id_length = struct.unpack("!H32SB", data)
+        index = 35
+        session_id = data[35 : 35 + session_id_length]
+        index += session_id_length
+        cipher_suite, legacy_compression_method = struct.unpack("!2SB", data[index:])
+        index += 3
+        extensions = data[index:]
+        return cls(
+            version,
+            random,
+            session_id_length,
+            session_id,
+            cipher_suite,
+            legacy_compression_method,
+            extensions,
+        )
 
     def to_bytes(self):
         legacy_version_bytes = self.legacy_version.to_bytes(2, "big")
         legacy_session_id_echo_length = len(self.legacy_session_id_echo)
         legacy_session_id_echo_length_bytes = legacy_session_id_echo_length.to_bytes(
-            1, "big")
+            1, "big"
+        )
         extensions_length_bytes = len(self.extensions).to_bytes(2, "big")
-        return legacy_version_bytes + self.random + legacy_session_id_echo_length_bytes + self.legacy_session_id_echo + self.cipher_suite + bytes([self.legacy_compression_method]) + extensions_length_bytes + self.extensions
+        return (
+            legacy_version_bytes
+            + self.random
+            + legacy_session_id_echo_length_bytes
+            + self.legacy_session_id_echo
+            + self.cipher_suite
+            + bytes([self.legacy_compression_method])
+            + extensions_length_bytes
+            + self.extensions
+        )
+
+    def list_extensions(self):
+        startbyte = 0
+        extlist: list[Extension] = list()
+        size = len(self.extensions)
+        databytes = self.extensions
+        if size == 0:
+            return None
+        while startbyte < size:
+            type, length = struct.unpack("!HH", databytes)
+            startbyte += 4
+            data = databytes[startbyte : startbyte + length]
+            startbyte += length
+            extlist.append(Extension(type, data))
+        return extlist
+
 
 @dataclass
 class Extension:
     extension_type: int
+    length: int
     extension_data: bytes
 
+    def __init__(self, type: int, data: bytes):
+        self.extension_type = type
+        self.extension_data = data
+        self.length = len(data)
+
     def to_bytes(self):
-        return struct.pack('!H', self.extension_type) + struct.pack('!H', len(self.extension_data)) + self.extension_data
+        return (
+            struct.pack("!HH", self.extension_type, self.length) + self.extension_data
+        )
 
     @classmethod
     def from_bytes(cls, data):
-        extension_type, data = struct.unpack('!H', data[:2])[0], data[2:]
-        length, data = struct.unpack('!H', data[:2])[0], data[2:]
+        extension_type, data = struct.unpack("!H", data[:2])[0], data[2:]
+        length, data = struct.unpack("!H", data[:2])[0], data[2:]
         extension_data = data[:length]
         return cls(extension_type, extension_data), data[length:]
+
 
 class ExtensionType(IntEnum):
     server_name = 0
@@ -331,8 +456,10 @@ class ExtensionType(IntEnum):
     signature_algorithms_cert = 50
     key_share = 51
 
+
 class NameType(IntEnum):
     host_name = 0
+
 
 class NamedGroup(IntEnum):
     unallocated_RESERVED = 0x0000
@@ -354,19 +481,25 @@ class NamedGroup(IntEnum):
     ecdhe_private_use = 0xFE00
     obsolete_RESERVED3 = 0xFF01
 
+
 @dataclass
 class KeyShareEntry:
     group: NamedGroup
     key_exchange: bytes
 
     def to_bytes(self):
-        return struct.pack("!H", self.group) + struct.pack('!H', len(self.key_exchange)) + self.key_exchange
+        return (
+            struct.pack("!H", self.group)
+            + struct.pack("!H", len(self.key_exchange))
+            + self.key_exchange
+        )
 
     @classmethod
     def from_bytes(cls, data):
-        group, = struct.unpack("!H", data[:2])
+        (group,) = struct.unpack("!H", data[:2])
         key_exchange = data[2:]
         return cls(group=NamedGroup(group), key_exchange=key_exchange)
+
 
 @dataclass
 class KeyShareClientHello:
@@ -378,22 +511,27 @@ class KeyShareClientHello:
 
     @classmethod
     def from_bytes(cls, data):
-        n, = struct.unpack("!H", data[:2])
+        (n,) = struct.unpack("!H", data[:2])
         shares_bytes = data[2:]
-        client_shares = [KeyShareEntry.from_bytes(shares_bytes[i:i + len(shares_bytes) // n]) for i in range(0, len(shares_bytes), len(shares_bytes) // n)]
+        client_shares = [
+            KeyShareEntry.from_bytes(shares_bytes[i : i + len(shares_bytes) // n])
+            for i in range(0, len(shares_bytes), len(shares_bytes) // n)
+        ]
         return cls(client_shares=client_shares)
+
 
 @dataclass
 class KeyShareHelloRetryRequest:
     selected_group: NamedGroup
 
     def to_bytes(self):
-        return struct.pack('!H', self.selected_group)
+        return struct.pack("!H", self.selected_group)
 
     @classmethod
     def from_bytes(cls, data):
-        selected_group, = struct.unpack('!H', data)
+        (selected_group,) = struct.unpack("!H", data)
         return cls(NamedGroup(selected_group))
+
 
 @dataclass
 class KeyShareServerHello:
@@ -407,12 +545,13 @@ class KeyShareServerHello:
         server_share, data = KeyShareEntry.from_bytes(data)
         return cls(server_share)
 
+
 class UncompressedPointRepresentation:
     def __init__(self, X, Y):
         self.legacy_form = 4
         self.X = X
         self.Y = Y
-    
+
     @classmethod
     def from_bytes(cls, data: bytes):
         legacy_form, X, Y = struct.unpack("!B32s32s", data)
@@ -421,54 +560,62 @@ class UncompressedPointRepresentation:
     def to_bytes(self):
         return struct.pack("!B32s32s", self.legacy_form, self.X, self.Y)
 
+
 class PskKeyExchangeMode(IntEnum):
     psk_ke = 0
     psk_dhe_ke = 1
+
 
 @dataclass
 class PskKeyExchangeModes:
     ke_modes: list
 
     def to_bytes(self):
-        return struct.pack(f"B{len(self.ke_modes)}B", len(self.ke_modes), *self.ke_modes)
+        return struct.pack(
+            f"B{len(self.ke_modes)}B", len(self.ke_modes), *self.ke_modes
+        )
 
     @classmethod
     def from_bytes(cls, data):
         ke_modes_len, *ke_modes = struct.unpack(f"B{ke_modes_len}B", data)
         return cls(ke_modes=ke_modes)
 
+
 @dataclass
 class SupportedVersions:
     msg_type: int
     versions: List[int] = None
     selected_version: bytes = None
-    
+
     def to_bytes(self):
-        if self.msg_type == HandshakeType.client_hello: # client_hello
-            
-            num_versions = struct.pack('!B', len(self.versions) * 2)
-            versions = b''.join([struct.pack('!H', v) for v in self.versions])
+        if self.msg_type == HandshakeType.client_hello:  # client_hello
+
+            num_versions = struct.pack("!B", len(self.versions) * 2)
+            versions = b"".join([struct.pack("!H", v) for v in self.versions])
 
             return num_versions + versions
-        elif self.msg_type == HandshakeType.server_hello: # server_hello or HelloRetryRequest
+        elif (
+            self.msg_type == HandshakeType.server_hello
+        ):  # server_hello or HelloRetryRequest
             return self.selected_version
         else:
             raise ValueError("Invalid value for msg_type")
 
     @classmethod
     def from_bytes(cls, data: bytes):
-        msg_type, = struct.unpack('!H', data[:2])
+        (msg_type,) = struct.unpack("!H", data[:2])
         if msg_type == HandshakeType.client_hello:
             versions_len = data[2:4]
             versions = []
             for i in range(versions_len):
                 offset = 4 + 2 * i
-                version, = struct.unpack('!H', data[offset:offset + 2])
+                (version,) = struct.unpack("!H", data[offset : offset + 2])
                 versions.append(version)
             return cls(msg_type, versions=versions)
         elif msg_type == HandshakeType.server_hello:
             selected_version = data[2:4]
             return cls(msg_type, selected_version=selected_version)
+
 
 @dataclass
 class ServerName:
@@ -476,34 +623,40 @@ class ServerName:
     name: str
 
     def to_bytes(self):
-        return struct.pack("!B", self.name_type) + \
-            struct.pack("!B", len(self.name)) + self.name.encode()
+        return (
+            struct.pack("!B", self.name_type)
+            + struct.pack("!B", len(self.name))
+            + self.name.encode()
+        )
 
-    
+
 @dataclass
 class ServerNameList:
     server_name_list: List[ServerName]
 
     def to_bytes(self):
-        server_name_list_bytes = b''
+        server_name_list_bytes = b""
         for sn in self.server_name_list:
             name_len = len(sn.name)
-            server_name_list_bytes += struct.pack('!BH', sn.name_type, name_len) + sn.name.encode()
-        return struct.pack('!H', len(server_name_list_bytes)) + server_name_list_bytes
+            server_name_list_bytes += (
+                struct.pack("!BH", sn.name_type, name_len) + sn.name.encode()
+            )
+        return struct.pack("!H", len(server_name_list_bytes)) + server_name_list_bytes
 
     @classmethod
     def from_bytes(cls, data):
         pos = 0
-        list_len, = struct.unpack('!H', data[pos:pos+2])
+        (list_len,) = struct.unpack("!H", data[pos : pos + 2])
         pos += 2
         server_name_list = []
         while pos < list_len:
-            name_type, name_len = struct.unpack('!BH', data[pos:pos+3])
+            name_type, name_len = struct.unpack("!BH", data[pos : pos + 3])
             pos += 3
-            name = data[pos:pos+name_len]
+            name = data[pos : pos + name_len]
             pos += name_len
             server_name_list.append(ServerName(name_type, name))
         return cls(server_name_list)
+
 
 class SignatureScheme(IntEnum):
     rsa_pkcs1_sha256 = 0x0401
@@ -518,29 +671,36 @@ class SignatureScheme(IntEnum):
     ed25519 = 0x0807
     ed448 = 0x0808
     rsa_pss_pss_sha256 = 0x0809
-    rsa_pss_pss_sha384 = 0x080a
-    rsa_pss_pss_sha512 = 0x080b
+    rsa_pss_pss_sha384 = 0x080A
+    rsa_pss_pss_sha512 = 0x080B
     rsa_pkcs1_sha1 = 0x0201
     ecdsa_sha1 = 0x0203
+
 
 class SignatureSchemeList:
     def __init__(self, supported_signature_algorithms):
         self.supported_signature_algorithms = supported_signature_algorithms
 
     def to_bytes(self):
-        supported_signature_algorithms_len = len(self.supported_signature_algorithms) * 2
-        supported_signature_algorithms_bytes = b''.join(
-            [s.to_bytes(2, byteorder='big') for s in self.supported_signature_algorithms]
+        supported_signature_algorithms_len = (
+            len(self.supported_signature_algorithms) * 2
         )
-        return supported_signature_algorithms_len.to_bytes(2, byteorder='big') + supported_signature_algorithms_bytes
+        supported_signature_algorithms_bytes = b"".join(
+            [
+                s.to_bytes(2, byteorder="big")
+                for s in self.supported_signature_algorithms
+            ]
+        )
+        return (
+            supported_signature_algorithms_len.to_bytes(2, byteorder="big")
+            + supported_signature_algorithms_bytes
+        )
 
     @classmethod
     def from_bytes(cls, data):
-        supported_signature_algorithms_len = int.from_bytes(
-            data[:2], byteorder='big'
-        )
+        supported_signature_algorithms_len = int.from_bytes(data[:2], byteorder="big")
         supported_signature_algorithms = [
-            SignatureScheme(int.from_bytes(data[i:i+2], byteorder='big'))
+            SignatureScheme(int.from_bytes(data[i : i + 2], byteorder="big"))
             for i in range(2, supported_signature_algorithms_len + 2, 2)
         ]
         return cls(supported_signature_algorithms)
@@ -552,26 +712,26 @@ class NamedGroupList:
 
     def to_bytes(self):
         named_group_list = len(self.named_group_list) * 2
-        named_group_list_bytes = b''.join(
-            [s.to_bytes(2, byteorder='big') for s in self.named_group_list]
+        named_group_list_bytes = b"".join(
+            [s.to_bytes(2, byteorder="big") for s in self.named_group_list]
         )
-        return named_group_list.to_bytes(2, byteorder='big') + named_group_list_bytes
+        return named_group_list.to_bytes(2, byteorder="big") + named_group_list_bytes
 
     @classmethod
     def from_bytes(cls, data):
-        named_group_list_len = int.from_bytes(
-            data[:2], byteorder='big'
-        )
+        named_group_list_len = int.from_bytes(data[:2], byteorder="big")
         named_group_list = [
-            NamedGroup(int.from_bytes(data[i:i+2], byteorder='big'))
+            NamedGroup(int.from_bytes(data[i : i + 2], byteorder="big"))
             for i in range(2, named_group_list_len + 2, 2)
         ]
         return cls(named_group_list)
+
 
 class ECPointFormat(IntEnum):
     uncompressed = 0
     ansiX962_compressed_prime = 1
     ansiX962_compressed_char2 = 2
+
 
 class ECPointFormatList:
     def __init__(self, ec_point_format_list):
@@ -579,8 +739,10 @@ class ECPointFormatList:
 
     def to_bytes(self):
         ec_point_format_list = len(self.ec_point_format_list)
-        ec_point_format_list_bytes = b''.join(
-            [p.to_bytes(1, byteorder='big') for p in self.ec_point_format_list]
+        ec_point_format_list_bytes = b"".join(
+            [p.to_bytes(1, byteorder="big") for p in self.ec_point_format_list]
         )
-        return ec_point_format_list.to_bytes(1, byteorder='big') + ec_point_format_list_bytes
-
+        return (
+            ec_point_format_list.to_bytes(1, byteorder="big")
+            + ec_point_format_list_bytes
+        )
