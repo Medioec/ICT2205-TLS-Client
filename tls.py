@@ -41,7 +41,7 @@ class TLSRecord:
 
 @dataclass
 class TLSRecordLayer:
-    records: list[TLSRecord] = None
+    records: List[TLSRecord] = None
 
     @classmethod
     def parse_records(cls, data: bytes) -> 'TLSRecordLayer':
@@ -453,6 +453,9 @@ class ExtensionType(IntEnum):
     client_certificate_type = 19
     server_certificate_type = 20
     padding = 21
+    encrypt_then_mac = 22
+    extended_master_secret = 23
+    session_ticket = 35
     pre_shared_key = 41
     early_data = 42
     supported_versions = 43
@@ -754,3 +757,10 @@ class ECPointFormatList:
             ec_point_format_list.to_bytes(1, byteorder="big")
             + ec_point_format_list_bytes
         )
+
+@dataclass
+class SessionTicket:
+    ticket: list
+
+    def to_bytes(self):
+        return struct.pack(f"!H", len(self.ticket)) + ''.join(self.ticket).encode()
