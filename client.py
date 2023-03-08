@@ -159,7 +159,9 @@ def main():
             crypto = parse_server_hello(tls_list)
             # TODO ECDHE calculation for decryption of server certs, verify server certs
             # rfc7748
-            crypto.early_secret = ecdhparam.generate_shared_secret(crypto.key_share_entry.key_exchange)
+            crypto.early_secret = ecdhparam.generate_shared_secret(
+                crypto.key_share_entry.key_exchange
+            )
             print(f"Early ECDH secret: {crypto.early_secret.hex()}")
         except socket.gaierror:
             # this means could not resolve the host
@@ -186,6 +188,7 @@ def parse_server_hello(tls_list: list[tls.TLSRecordLayer]) -> CryptoHandler:
             crypto.key_share_entry = key_share_entry
     crypto.cipher_suite = handshake.server_hello.cipher_suite
     return crypto
+
 
 def verify_response(
     clienthello: tls.ClientHello, serverhello: bytes, s: socket
@@ -233,7 +236,9 @@ def check_server_hello(
         if s.extension_type != tls.ExtensionType.supported_versions:
             continue
         if s.extension_data != tls.TLS13_PROTOCOL_VERSION.to_bytes(2, "big"):
-            raise Exception("Unexpected value in server hello supported versions extension")
+            raise Exception(
+                "Unexpected value in server hello supported versions extension"
+            )
         supported_versions_present = True
     if not supported_versions_present:
         raise Exception("illegal parameter")
