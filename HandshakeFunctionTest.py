@@ -14,7 +14,7 @@ def main():
     ch_bytes = bytes(clienthello[TCP].payload)
     sh_bytes = bytes(serverhello[TCP].payload)
     cho = tls.ClientHello.from_bytes(ch_bytes)
-    cho, sho = client.parse_server_hello(cho, sh_bytes)
+    cho, sho = client.verify_response(cho, sh_bytes)
     return
 
 

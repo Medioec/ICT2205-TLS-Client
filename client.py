@@ -7,6 +7,8 @@ import tls_constants
 import x25519
 
 from typing import Tuple
+from models.ECDH import *
+from models.CryptoHandler import *
 
 pattern = re.compile(
     r"^(([a-zA-Z]{1})|([a-zA-Z]{1}[a-zA-Z]{1})|"
@@ -65,10 +67,11 @@ def main():
         print("start")
         try:
             # sni, ec, groups, session ticket, etm, extended master secret, sigalgo, versions, psk key exchange modes, key share
+            ecdhparam = ECDH("x25519")
+            x25519_public = ecdhparam.public
             ip = socket.gethostbyname(args.hostname)
             clientrandom = secrets.token_bytes(32)
             legacy_session_id = secrets.token_bytes(32)
-            x25519_private = secrets.token_bytes(32)
             sni = tls.ServerName(tls.NameType.host_name, args.hostname)
             snilist = tls.ServerNameList([sni])
             sniext = tls.Extension(tls.ExtensionType.server_name, snilist.to_bytes())
@@ -96,26 +99,24 @@ def main():
             )
             session_ticket = tls.Extension(
                 tls.ExtensionType.session_ticket,
-                ''.encode(),
+                "".encode(),
             )
             encrypt_then_mac = tls.Extension(
                 tls.ExtensionType.encrypt_then_mac,
-                ''.encode(),
+                "".encode(),
             )
             extended_master_secret = tls.Extension(
                 tls.ExtensionType.extended_master_secret,
-                ''.encode(),
+                "".encode(),
             )
             psk_key_exchange_modes = tls.Extension(
                 tls.ExtensionType.psk_key_exchange_modes,
-                tls.PskKeyExchangeModes(
-                    [tls.PskKeyExchangeMode.psk_dhe_ke]
-                    ).to_bytes(),
+                tls.PskKeyExchangeModes([tls.PskKeyExchangeMode.psk_dhe_ke]).to_bytes(),
             )
             keyshare = tls.Extension(
                 tls.ExtensionType.key_share,
                 tls.KeyShareClientHello(
-                    [tls.KeyShareEntry(tls.NamedGroup.x25519, x25519_private)]
+                    [tls.KeyShareEntry(tls.NamedGroup.x25519, x25519_public)]
                 ).to_bytes(),
             )
             ec_point_format_list = tls.Extension(
@@ -126,9 +127,9 @@ def main():
                 sniext.to_bytes()
                 + ec_point_format_list.to_bytes()
                 + groups.to_bytes()
-                + session_ticket.to_bytes() # optional
-                + encrypt_then_mac.to_bytes() # optional
-                + extended_master_secret.to_bytes() # optional
+                + session_ticket.to_bytes()  # optional
+                + encrypt_then_mac.to_bytes()  # optional
+                + extended_master_secret.to_bytes()  # optional
                 + signaturealgo.to_bytes()
                 + tls13.to_bytes()
                 + psk_key_exchange_modes.to_bytes()
@@ -146,44 +147,72 @@ def main():
             )
             s.connect((ip, args.port))
             s.sendall(tlspt_clienthello.to_bytes())
-            sh_bytes = s.recv(4096)
+
             done = False
-            sh_list = []
+            tls_list: list[tls.TLSRecordLayer] = []
             while not done:
-                done, clienthello, serverhello = parse_server_hello(clienthello, sh_bytes, s)
-                sh_list.append(serverhello)
+                sh_bytes = s.recv(4096)
+                done, clienthello, tls_record_layer = verify_response(
+                    clienthello, sh_bytes, s
+                )
+                tls_list.append(tls_record_layer)
+            crypto = parse_server_hello(tls_list)
+            # TODO ECDHE calculation for decryption of server certs, verify server certs
+            # rfc7748
+            crypto.early_secret = ecdhparam.generate_shared_secret(crypto.key_share_entry.key_exchange)
+            print(f"Early ECDH secret: {crypto.early_secret.hex()}")
         except socket.gaierror:
             # this means could not resolve the host
             print(f"Could not find host {args.hostname}")
     return
 
 
-def parse_server_hello(clienthello: tls.ClientHello, serverhello: bytes, s:socket) -> Tuple[bool, tls.ClientHello, tls.TLSRecordLayer]:
+def parse_server_hello(tls_list: list[tls.TLSRecordLayer]) -> CryptoHandler:
+    handshake = None
+    for recordlayer in tls_list:
+        handshake = recordlayer.parse_handshake()
+        if handshake == None or handshake.server_hello == None:
+            continue
+        else:
+            break
+    if handshake == None or handshake.server_hello == None:
+        raise Exception("Unexpected error")
+    crypto = CryptoHandler()
+    extlist = handshake.server_hello.list_extensions()
+    for ext in extlist:
+        etype = ext.extension_type
+        if etype == tls.ExtensionType.key_share:
+            key_share_entry = tls.KeyShareEntry.from_bytes(ext.extension_data)
+            crypto.key_share_entry = key_share_entry
+    crypto.cipher_suite = handshake.server_hello.cipher_suite
+    return crypto
+
+def verify_response(
+    clienthello: tls.ClientHello, serverhello: bytes, s: socket
+) -> Tuple[bool, tls.ClientHello, tls.TLSRecordLayer]:
     recordlayer = tls.TLSRecordLayer.parse_records(serverhello)
     check_for_alerts(recordlayer)
     handshake = recordlayer.parse_handshake()
     if handshake == None or handshake.server_hello == None:
         # no handshake found
         return
-    res, clienthello, serverhello = check_server_hello(handshake.server_hello, clienthello)
+    res, clienthello, serverhello = check_server_hello(
+        handshake.server_hello, clienthello
+    )
     if res != True:
-        raise Exception("illegal parameter")
-    return recordlayer.is_handshake_complete(), clienthello, serverhello
+        # TODO handle hello retry request
+        raise Exception("Hello retry not implemented")
+    return recordlayer.is_handshake_complete(), clienthello, recordlayer
 
 
 def check_server_hello(
-    serverhello: tls.ServerHello, clienthello: tls.ClientHello, second_try=False
-):
+    serverhello: tls.ServerHello, clienthello: tls.ClientHello
+) -> Tuple[bool, tls.ClientHello, tls.ServerHello]:
     # check for special values in random
     if serverhello.random == bytes.fromhex(
         "CF21AD74E59A6111BE1D8C021E65B891C2A211167ABB8C5E079E09E2C8A8339C"
-    ): # indicates hello retry request
-        if second_try:
-            raise Exception("unexpected_message")
-        # TODO: handle retry request 4.1.4
-        new_client_hello: tls.ClientHello
-        new_server_hello: tls.ServerHello
-        return check_server_hello(new_server_hello, new_client_hello, True)
+    ):  # indicates hello retry request
+        return False, clienthello, serverhello
     elif serverhello.random[-8:] == bytes.fromhex("444F574E47524401"):
         raise Exception("illegal parameter")
     elif serverhello.random[-8:] == bytes.fromhex("444F574E47524400"):
@@ -198,9 +227,15 @@ def check_server_hello(
     if serverhello.legacy_compression_method != 0:
         raise Exception("illegal parameter")
     server_ext = serverhello.list_extensions()
+    supported_versions_present = False
     for s in server_ext:
-        if s.extension_type == tls.ExtensionType.supported_versions:
-            break
+        # must have supported versions extension
+        if s.extension_type != tls.ExtensionType.supported_versions:
+            continue
+        if s.extension_data != tls.TLS13_PROTOCOL_VERSION.to_bytes(2, "big"):
+            raise Exception("Unexpected value in server hello supported versions extension")
+        supported_versions_present = True
+    if not supported_versions_present:
         raise Exception("illegal parameter")
     # TODO: to check that only extensions that are required for negotiation are present
     return True, clienthello, serverhello
@@ -211,8 +246,9 @@ def check_for_alerts(recordlayer: tls.TLSRecordLayer):
     if alert == None:
         return
     print(f"Alert: {alert.level.name}: {alert.description.name}")
-    #TODO: more alert handling
+    # TODO: more alert handling
     raise Exception("alert received")
+
 
 if __name__ == "__main__":
     main()

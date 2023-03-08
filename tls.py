@@ -337,7 +337,7 @@ class ServerHello:
     random: bytes
     session_id_length: int
     legacy_session_id_echo: bytes
-    cipher_suite: bytes
+    cipher_suite: int
     legacy_compression_method: int
     extensions: bytes
 
@@ -361,13 +361,14 @@ class ServerHello:
 
     @classmethod
     def from_bytes(cls, data: bytes):
-        version, random, session_id_length = struct.unpack("!H32SB", data)
+        version, random, session_id_length = struct.unpack("!H32sB", data[:35])
         index = 35
         session_id = data[35 : 35 + session_id_length]
         index += session_id_length
-        cipher_suite, legacy_compression_method = struct.unpack("!2SB", data[index:])
+        cipher_suite, legacy_compression_method = struct.unpack("!HB", data[index:index + 3])
         index += 3
-        extensions = data[index:]
+        extensions_length = data[index:index + 2]
+        extensions = data[index + 2:]
         return cls(
             version,
             random,
@@ -404,7 +405,7 @@ class ServerHello:
         if size == 0:
             return None
         while startbyte < size:
-            type, length = struct.unpack("!HH", databytes)
+            type, length = struct.unpack("!HH", databytes[startbyte : startbyte + 4])
             startbyte += 4
             data = databytes[startbyte : startbyte + length]
             startbyte += length
@@ -507,8 +508,8 @@ class KeyShareEntry:
 
     @classmethod
     def from_bytes(cls, data):
-        (group,) = struct.unpack("!H", data[:2])
-        key_exchange = data[2:]
+        group, length = struct.unpack("!HH", data[:4])
+        key_exchange = data[4:]
         return cls(group=NamedGroup(group), key_exchange=key_exchange)
 
 
