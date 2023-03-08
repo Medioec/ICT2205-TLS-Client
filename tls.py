@@ -44,7 +44,7 @@ class TLSRecordLayer:
     records: list[TLSRecord] = None
 
     @classmethod
-    def parse_records(cls, data: bytes):
+    def parse_records(cls, data: bytes) -> 'TLSRecordLayer':
         startbyte = 0
         records = list()
         while startbyte < len(data):
@@ -59,25 +59,33 @@ class TLSRecordLayer:
             startbyte += length + 5
         return cls(records)
 
-    def parse_handshake(self):
+    def parse_handshake(self) -> 'Handshake':
         handshake: Handshake = None
         for record in self.records:
             if record.type == ContentType.handshake:
-                handshake = Handshake.from_bytes(record.fragments)
+                record: TLSPlaintext
+                handshake = Handshake.from_bytes(record.fragment)
                 return handshake
 
-    def parse_alert(self):
+    def parse_alert(self) -> 'Alert':
         alert: Alert = None
         for record in self.records:
             if isinstance(record, TLSPlaintext) and record.type == ContentType.alert:
                 alert = Alert.from_bytes(record.fragment)
                 return alert
 
+    def is_handshake_complete(self) -> bool:
+        for record in self.records:
+            if record.type != ContentType.application_data:
+                continue
+            return True
+        return False
+
 @dataclass
 class TLSPlaintext(TLSRecord):
     fragment: bytes
 
-    def to_bytes(self):
+    def to_bytes(self) -> bytes:
         return (
             struct.pack("!BH", self.type.value, self.legacy_record_version)
             + struct.pack("!H", self.length)
@@ -85,7 +93,7 @@ class TLSPlaintext(TLSRecord):
         )
 
     @classmethod
-    def from_bytes(cls, data: bytes):
+    def from_bytes(cls, data: bytes) -> 'TLSPlaintext':
         type, legacy_record_version = struct.unpack("!BH", data[:3])
         (length,) = struct.unpack("!H", data[3:5])
         fragment = data[5 : 5 + length]
@@ -98,11 +106,11 @@ class TLSInnerPlaintext:
     type: ContentType
     zeros: bytes
 
-    def to_bytes(self):
+    def to_bytes(self) -> bytes:
         return self.content + struct.pack("!B", self.type.value) + self.zeros
 
     @classmethod
-    def from_bytes(cls, data: bytes):
+    def from_bytes(cls, data: bytes) -> 'TLSInnerPlaintext':
         type = ContentType(data[-1])
         zeros = data[-1:]
         content = data[:-1]
@@ -113,7 +121,7 @@ class TLSInnerPlaintext:
 class TLSCiphertext(TLSRecord):
     encrypted_record: bytes
 
-    def to_bytes(self):
+    def to_bytes(self) -> bytes:
         return (
             struct.pack("!BH", self.type.value, self.legacy_record_version)
             + struct.pack("!H", self.length)
@@ -121,7 +129,7 @@ class TLSCiphertext(TLSRecord):
         )
 
     @classmethod
-    def from_bytes(cls, data: bytes):
+    def from_bytes(cls, data: bytes) -> 'TLSCiphertext':
         opaque_type, legacy_record_version = struct.unpack("!BH", data[:3])
         (length,) = struct.unpack("!H", data[3:5])
         encrypted_record = data[5 : 5 + length]
@@ -388,7 +396,7 @@ class ServerHello:
             + self.extensions
         )
 
-    def list_extensions(self):
+    def list_extensions(self) -> list['Extension']:
         startbyte = 0
         extlist: list[Extension] = list()
         size = len(self.extensions)

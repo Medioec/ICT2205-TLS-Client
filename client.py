@@ -6,6 +6,8 @@ import tls
 import tls_constants
 import x25519
 
+from typing import Tuple
+
 pattern = re.compile(
     r"^(([a-zA-Z]{1})|([a-zA-Z]{1}[a-zA-Z]{1})|"
     r"([a-zA-Z]{1}[0-9]{1})|([0-9]{1}[a-zA-Z]{1})|"
@@ -119,24 +121,29 @@ def main():
             )
             s.connect((ip, args.port))
             s.sendall(tlspt_clienthello.to_bytes())
-            clienthello, serverhello = parse_server_hello(clienthello, s)
+            sh_bytes = s.recv(4096)
+            done = False
+            sh_list = []
+            while not done:
+                done, clienthello, serverhello = parse_server_hello(clienthello, sh_bytes, s)
+                sh_list.append(serverhello)
         except socket.gaierror:
             # this means could not resolve the host
             print(f"Could not find host {args.hostname}")
     return
 
 
-def parse_server_hello(clienthello: tls.ClientHello, s: socket.socket):
-    data = s.recv(4096)
-    recordlayer = tls.TLSRecordLayer.parse_records(data)
+def parse_server_hello(clienthello: tls.ClientHello, serverhello: bytes, s:socket) -> Tuple[bool, tls.ClientHello, tls.TLSRecordLayer]:
+    recordlayer = tls.TLSRecordLayer.parse_records(serverhello)
     check_for_alerts(recordlayer)
     handshake = recordlayer.parse_handshake()
-    if handshake.server_hello == None or handshake == None:
+    if handshake == None or handshake.server_hello == None:
+        # no handshake found
         return
     res, clienthello, serverhello = check_server_hello(handshake.server_hello, clienthello)
     if res != True:
         raise Exception("illegal parameter")
-    return clienthello, serverhello
+    return recordlayer.is_handshake_complete(), clienthello, serverhello
 
 
 def check_server_hello(
