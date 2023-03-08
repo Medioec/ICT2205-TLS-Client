@@ -80,14 +80,35 @@ def main():
                 tls.ExtensionType.signature_algorithms,
                 tls.SignatureSchemeList(
                     [
-                        tls.SignatureScheme.ed25519,
                         tls.SignatureScheme.ecdsa_secp256r1_sha256,
+                        tls.SignatureScheme.ecdsa_secp384r1_sha384,
+                        tls.SignatureScheme.ecdsa_secp521r1_sha512,
+                        tls.SignatureScheme.ed25519,
+                        tls.SignatureScheme.ed448,
                     ]
                 ).to_bytes(),
             )
             groups = tls.Extension(
                 tls.ExtensionType.supported_groups,
                 tls.NamedGroupList([tls.NamedGroup.x25519]).to_bytes(),
+            )
+            session_ticket = tls.Extension(
+                tls.ExtensionType.session_ticket,
+                ''.encode(),
+            )
+            encrypt_then_mac = tls.Extension(
+                tls.ExtensionType.encrypt_then_mac,
+                ''.encode(),
+            )
+            extended_master_secret = tls.Extension(
+                tls.ExtensionType.extended_master_secret,
+                ''.encode(),
+            )
+            psk_key_exchange_modes = tls.Extension(
+                tls.ExtensionType.psk_key_exchange_modes,
+                tls.PskKeyExchangeModes(
+                    [tls.PskKeyExchangeMode.psk_dhe_ke]
+                    ).to_bytes(),
             )
             keyshare = tls.Extension(
                 tls.ExtensionType.key_share,
@@ -103,8 +124,12 @@ def main():
                 sniext.to_bytes()
                 + ec_point_format_list.to_bytes()
                 + groups.to_bytes()
+                + session_ticket.to_bytes() # optional
+                + encrypt_then_mac.to_bytes() # optional
+                + extended_master_secret.to_bytes() # optional
                 + signaturealgo.to_bytes()
                 + tls13.to_bytes()
+                + psk_key_exchange_modes.to_bytes()
                 + keyshare.to_bytes()
             )
             clienthello = tls.ClientHello(clientrandom, legacy_session_id, extensions)
