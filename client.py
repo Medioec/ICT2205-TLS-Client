@@ -7,7 +7,6 @@ import tls_constants
 import x25519
 
 from typing import Tuple
-from models.ECDH import *
 from models.CryptoHandler import *
 
 pattern = re.compile(
@@ -67,8 +66,8 @@ def main():
         print("start")
         try:
             # sni, ec, groups, session ticket, etm, extended master secret, sigalgo, versions, psk key exchange modes, key share
-            ecdhparam = ECDH("x25519")
-            x25519_public = ecdhparam.public
+            crypto = CryptoHandler("x25519")
+            x25519_public = crypto.ecdhparam.public
             ip = socket.gethostbyname(args.hostname)
             clientrandom = secrets.token_bytes(32)
             legacy_session_id = secrets.token_bytes(32)
@@ -156,20 +155,18 @@ def main():
                     clienthello, sh_bytes, s
                 )
                 tls_list.append(tls_record_layer)
-            crypto = parse_server_hello(tls_list)
+            parse_server_hello(tls_list, crypto)
             # TODO ECDHE calculation for decryption of server certs, verify server certs
             # rfc7748
-            crypto.early_secret = ecdhparam.generate_shared_secret(
-                crypto.key_share_entry.key_exchange
-            )
-            print(f"Early ECDH secret: {crypto.early_secret.hex()}")
+            crypto.calculate_handshake_secrets(crypto.key_share_entry.key_exchange)
+            crypto.print_secrets()
         except socket.gaierror:
             # this means could not resolve the host
             print(f"Could not find host {args.hostname}")
     return
 
 
-def parse_server_hello(tls_list: list[tls.TLSRecordLayer]) -> CryptoHandler:
+def parse_server_hello(tls_list: list[tls.TLSRecordLayer], crypto: CryptoHandler):
     handshake = None
     for recordlayer in tls_list:
         handshake = recordlayer.parse_handshake()
@@ -179,21 +176,20 @@ def parse_server_hello(tls_list: list[tls.TLSRecordLayer]) -> CryptoHandler:
             break
     if handshake == None or handshake.server_hello == None:
         raise Exception("Unexpected error")
-    crypto = CryptoHandler()
     extlist = handshake.server_hello.list_extensions()
     for ext in extlist:
         etype = ext.extension_type
         if etype == tls.ExtensionType.key_share:
             key_share_entry = tls.KeyShareEntry.from_bytes(ext.extension_data)
             crypto.key_share_entry = key_share_entry
-    crypto.cipher_suite = handshake.server_hello.cipher_suite
-    return crypto
+            break
+    crypto.set_cipher_suite(handshake.server_hello.cipher_suite)
 
 
 def verify_response(
-    clienthello: tls.ClientHello, serverhello: bytes, s: socket
+    clienthello: tls.ClientHello, server_response: bytes, s: socket
 ) -> Tuple[bool, tls.ClientHello, tls.TLSRecordLayer]:
-    recordlayer = tls.TLSRecordLayer.parse_records(serverhello)
+    recordlayer = tls.TLSRecordLayer.parse_records(server_response)
     check_for_alerts(recordlayer)
     handshake = recordlayer.parse_handshake()
     if handshake == None or handshake.server_hello == None:

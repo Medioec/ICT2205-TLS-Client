@@ -1,7 +1,7 @@
 import x25519
 import secrets
 
-
+# rfc 7748
 class ECDH:
     private: bytes
     public: bytes
@@ -16,7 +16,7 @@ class ECDH:
             raise Exception("Unsupported operation, please fix the code")
 
     def generate_private(self):
-        private = secrets.token_bytes(32)
+        self.private = secrets.token_bytes(32)
 
     def generate_shared_secret(self, server_public: bytes) -> bytes:
         self.server_public = server_public
