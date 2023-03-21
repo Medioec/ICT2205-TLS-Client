@@ -7,7 +7,7 @@ from models.ECDH import *
 class CryptoHandler:
     key_share_entry: tls.KeyShareEntry = None
     cipher_suite: int = None
-    hashlib_algo: None # hashlib hash function
+    hashlib_algo: None  # hashlib hash function
     hash_length: int
 
     ecdhparam: ECDH = None
@@ -16,45 +16,50 @@ class CryptoHandler:
     ecdh_secret: bytes
     handshake_secret: bytes
     master_secret: bytes
-    
+
     handshake_bytes: bytes
     full_handshake_bytes: bytes
     transcript_hash: bytes
-    
+
     client_handshake_write_key: bytes
     client_handshake_write_iv: bytes
 
     def __init__(self, curve: str):
         self.ecdhparam = ECDH(curve)
-        
-    
+
     def set_handshake_bytes(self, clienthello: tls.ClientHello, serverhello: tls.ServerHello):
         hsbytes = clienthello.to_bytes() + serverhello.to_bytes()
         self.handshake_bytes = hsbytes
-    
 
     def calculate_handshake_secrets(self, server_keyshare: bytes):
-        self.ecdh_secret = self.ecdhparam.generate_shared_secret(server_keyshare)
+        self.ecdh_secret = self.ecdhparam.generate_shared_secret(
+            server_keyshare)
         zeros = self.gen_0_bytes()
         self.early_secret = self.hkdf_extract(zeros, zeros)
         self.handshake_secret = self.hkdf_extract(
-            self.ecdh_secret, self.derive_secret(self.early_secret, "derived", b"")
+            self.ecdh_secret, self.derive_secret(
+                self.early_secret, "derived", b"")
         )
         self.master_secret = self.hkdf_extract(
             zeros, self.derive_secret(self.handshake_secret, "derived", b"")
         )
-        
-        client_handshake_traffic_secret = self.derive_secret(self.handshake_secret, "c hs traffic", self.handshake_bytes)
-        server_handshake_traffic_secret = self.derive_secret(self.handshake_secret, "s hs traffic", self.handshake_bytes)
-        self.client_handshake_write_key = self.hkdf_expand_label(client_handshake_traffic_secret, "key", b"", self.traffic_key_length)
-        self.client_handshake_write_iv = self.hkdf_expand_label(client_handshake_traffic_secret, "iv", b"", self.traffic_iv_length)
 
+        client_handshake_traffic_secret = self.derive_secret(
+            self.handshake_secret, "c hs traffic", self.handshake_bytes)
+        server_handshake_traffic_secret = self.derive_secret(
+            self.handshake_secret, "s hs traffic", self.handshake_bytes)
+        self.client_handshake_write_key = self.hkdf_expand_label(
+            client_handshake_traffic_secret, "key", b"", self.traffic_key_length)
+        self.client_handshake_write_iv = self.hkdf_expand_label(
+            client_handshake_traffic_secret, "iv", b"", self.traffic_iv_length)
 
     def calculate_application_secrets(self):
-        client_application_traffic_secret = self.derive_secret(self.master_secret, "c ap traffic", self.full_handshake_bytes)
-        self.client_application_write_key = self.hkdf_expand_label(client_application_traffic_secret, "key", b"", self.traffic_key_length)
-        self.client_application_write_iv = self.hkdf_expand_label(client_application_traffic_secret, "iv", b"", self.traffic_iv_length)
-
+        client_application_traffic_secret = self.derive_secret(
+            self.master_secret, "c ap traffic", self.full_handshake_bytes)
+        self.client_application_write_key = self.hkdf_expand_label(
+            client_application_traffic_secret, "key", b"", self.traffic_key_length)
+        self.client_application_write_iv = self.hkdf_expand_label(
+            client_application_traffic_secret, "iv", b"", self.traffic_iv_length)
 
     def gen_0_bytes(self) -> bytearray:
         return bytearray(self.hash_length)
@@ -83,9 +88,11 @@ class CryptoHandler:
         self, secret: bytes, label: str, context: bytes, length: int
     ) -> bytes:
         hkdf_label = (
-            length.to_bytes(2, "big") + bytes("tls13 " + label, "utf-8") + context
+            length.to_bytes(2, "big") + bytes("tls13 " +
+                                              label, "utf-8") + context
         )
-        res = hkdf.hkdf_expand(secret, hkdf_label, length, hash=self.hashlib_algo)
+        res = hkdf.hkdf_expand(
+            secret, hkdf_label, length, hash=self.hashlib_algo)
         return res
 
     def hkdf_extract(self, salt: bytes, key: bytes) -> bytes:
