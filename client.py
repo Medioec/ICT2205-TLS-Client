@@ -160,6 +160,13 @@ def main():
             # rfc7748
             crypto.calculate_handshake_secrets(crypto.key_share_entry.key_exchange)
             crypto.print_secrets()
+            encrypted_handshakes: list[tls.TLSCiphertext] = []
+            for packet in tls_list:
+                for record in packet.records:
+                    if record.type == tls.ContentType.application_data:
+                        encrypted_handshakes.append(record)
+            for enc in encrypted_handshakes:
+                crypto.decrypt_handshake(enc)
         except socket.gaierror:
             # this means could not resolve the host
             print(f"Could not find host {args.hostname}")

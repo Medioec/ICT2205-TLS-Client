@@ -34,9 +34,9 @@ class ContentType(IntEnum):
 
 @dataclass
 class TLSRecord:
-    type: ContentType
-    legacy_record_version: int
-    length: int
+    type: ContentType # 1 byte
+    legacy_record_version: int # 2 bytes
+    length: int # 2 bytes
 
 
 @dataclass
@@ -337,7 +337,7 @@ class ServerHello:
     random: bytes
     session_id_length: int
     legacy_session_id_echo: bytes
-    cipher_suite: int
+    cipher_suite: int # 2 bytes
     legacy_compression_method: int
     extensions: bytes
 
@@ -391,7 +391,7 @@ class ServerHello:
             + self.random
             + legacy_session_id_echo_length_bytes
             + self.legacy_session_id_echo
-            + self.cipher_suite
+            + self.cipher_suite.to_bytes(2, "big")
             + bytes([self.legacy_compression_method])
             + extensions_length_bytes
             + self.extensions
