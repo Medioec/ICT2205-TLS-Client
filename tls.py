@@ -379,7 +379,7 @@ class ServerHello:
             extensions,
         )
 
-    def to_bytes(self):
+    def to_bytes(self) -> bytes:
         legacy_version_bytes = self.legacy_version.to_bytes(2, "big")
         legacy_session_id_echo_length = len(self.legacy_session_id_echo)
         legacy_session_id_echo_length_bytes = legacy_session_id_echo_length.to_bytes(

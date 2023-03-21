@@ -155,7 +155,7 @@ def main():
                     clienthello, sh_bytes, s
                 )
                 tls_list.append(tls_record_layer)
-            parse_server_hello(tls_list, crypto)
+            parse_server_hello(clienthello, tls_list, crypto)
             # TODO ECDHE calculation for decryption of server certs, verify server certs
             # rfc7748
             crypto.calculate_handshake_secrets(crypto.key_share_entry.key_exchange)
@@ -166,7 +166,7 @@ def main():
     return
 
 
-def parse_server_hello(tls_list: list[tls.TLSRecordLayer], crypto: CryptoHandler):
+def parse_server_hello(clienthello: tls.ClientHello, tls_list: list[tls.TLSRecordLayer], crypto: CryptoHandler):
     handshake = None
     for recordlayer in tls_list:
         handshake = recordlayer.parse_handshake()
@@ -184,6 +184,7 @@ def parse_server_hello(tls_list: list[tls.TLSRecordLayer], crypto: CryptoHandler
             crypto.key_share_entry = key_share_entry
             break
     crypto.set_cipher_suite(handshake.server_hello.cipher_suite)
+    crypto.set_handshake_bytes(clienthello, handshake.server_hello)
 
 
 def verify_response(
