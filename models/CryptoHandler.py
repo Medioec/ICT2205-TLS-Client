@@ -50,8 +50,7 @@ class CryptoHandler:
         nonce = self.xor(padded_seq, self.server_handshake_write_iv)
         additional_data = tlsct.type.to_bytes(
             1, "big") + tlsct.legacy_record_version.to_bytes(2, "big") + tlsct.length.to_bytes(2, "big")
-        
-        
+
         aesgcm = AESGCM(self.server_handshake_write_key)
         testdecrypt = aesgcm.decrypt(nonce, encbytes, additional_data)
         print(testdecrypt)

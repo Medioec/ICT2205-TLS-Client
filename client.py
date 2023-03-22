@@ -69,6 +69,7 @@ def main():
             crypto = CryptoHandler("x25519")
             x25519_public = crypto.ecdhparam.public
             ip = socket.gethostbyname(args.hostname)
+            print(ip)
             clientrandom = secrets.token_bytes(32)
             legacy_session_id = secrets.token_bytes(32)
             sni = tls.ServerName(tls.NameType.host_name, args.hostname)
@@ -155,6 +156,10 @@ def main():
                     clienthello, sh_bytes, s
                 )
                 tls_list.append(tls_record_layer)
+                # testing
+                for record in tls_record_layer.records:
+                    print("Record: " + record.to_bytes().hex())
+                print("End of records")
             parse_server_hello(clienthello, tls_list, crypto)
             # TODO ECDHE calculation for decryption of server certs, verify server certs
             # rfc7748
@@ -165,6 +170,8 @@ def main():
                 for record in packet.records:
                     if record.type == tls.ContentType.application_data:
                         encrypted_handshakes.append(record)
+                        print("Encrypted record: " + record.to_bytes().hex())
+            print("End of debugging print")
             for enc in encrypted_handshakes:
                 crypto.decrypt_handshake(enc)
         except socket.gaierror:

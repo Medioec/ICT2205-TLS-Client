@@ -38,6 +38,8 @@ class TLSRecord:
     legacy_record_version: int # 2 bytes
     length: int # 2 bytes
 
+    def to_bytes(self) -> bytes:
+        raise NotImplementedError("This method should be called on child classes instead")
 
 @dataclass
 class TLSRecordLayer:
