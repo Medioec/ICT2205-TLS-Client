@@ -63,13 +63,12 @@ parser.add_argument(
 def main():
     args = parser.parse_args()
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        print("start")
         try:
             # sni, ec, groups, session ticket, etm, extended master secret, sigalgo, versions, psk key exchange modes, key share
             crypto = CryptoHandler("x25519")
             x25519_public = crypto.ecdhparam.public
             ip = socket.gethostbyname(args.hostname)
-            print(ip)
+            print("Destination ip: " + ip)
             clientrandom = secrets.token_bytes(32)
             legacy_session_id = secrets.token_bytes(32)
             sni = tls.ServerName(tls.NameType.host_name, args.hostname)
@@ -151,16 +150,12 @@ def main():
             done = False
             tls_list: list[tls.TLSRecordLayer] = []
             while not done:
-                sh_bytes = s.recv(4096)
+                sh_bytes = s.recv(16384)
                 done, clienthello, tls_record_layer = verify_response(
                     clienthello, sh_bytes, s
                 )
                 tls_list.append(tls_record_layer)
-                # testing
-                for record in tls_record_layer.records:
-                    print("Record: " + record.to_bytes().hex())
-                print("End of records")
-            parse_server_hello(clienthello, tls_list, crypto)
+            parse_server_hello(handshake, tls_list, crypto)
             # TODO ECDHE calculation for decryption of server certs, verify server certs
             # rfc7748
             crypto.calculate_handshake_secrets(crypto.key_share_entry.key_exchange)
@@ -170,8 +165,6 @@ def main():
                 for record in packet.records:
                     if record.type == tls.ContentType.application_data:
                         encrypted_handshakes.append(record)
-                        print("Encrypted record: " + record.to_bytes().hex())
-            print("End of debugging print")
             for enc in encrypted_handshakes:
                 crypto.decrypt_handshake(enc)
         except socket.gaierror:
@@ -180,25 +173,26 @@ def main():
     return
 
 
-def parse_server_hello(clienthello: tls.ClientHello, tls_list: list[tls.TLSRecordLayer], crypto: CryptoHandler):
-    handshake = None
+def parse_server_hello(handshake: tls.Handshake, tls_list: list[tls.TLSRecordLayer], crypto: CryptoHandler):
+    server_handshake = None
     for recordlayer in tls_list:
-        handshake = recordlayer.parse_handshake()
-        if handshake == None or handshake.server_hello == None:
+        server_handshake = recordlayer.parse_handshake()
+        if server_handshake == None or server_handshake.server_hello == None:
             continue
         else:
             break
-    if handshake == None or handshake.server_hello == None:
+    if server_handshake == None or server_handshake.server_hello == None:
         raise Exception("Unexpected error")
-    extlist = handshake.server_hello.list_extensions()
+    extlist = server_handshake.server_hello.list_extensions()
     for ext in extlist:
         etype = ext.extension_type
         if etype == tls.ExtensionType.key_share:
             key_share_entry = tls.KeyShareEntry.from_bytes(ext.extension_data)
             crypto.key_share_entry = key_share_entry
             break
-    crypto.set_cipher_suite(handshake.server_hello.cipher_suite)
-    crypto.set_handshake_bytes(clienthello, handshake.server_hello)
+    crypto.set_cipher_suite(server_handshake.server_hello.cipher_suite)
+    ################
+    crypto.set_handshake_bytes(handshake, server_handshake)
 
 
 def verify_response(

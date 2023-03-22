@@ -37,7 +37,7 @@ class CryptoHandler:
 
     def __init__(self, curve: str):
         self.ecdhparam = ECDH(curve)
-        self.sequence_number = 1
+        self.sequence_number = 0
 
     def xor(self, b1: bytes, b2: bytes):
         return bytes(a ^ b for a, b in zip(b1, b2))
@@ -50,14 +50,12 @@ class CryptoHandler:
         nonce = self.xor(padded_seq, self.server_handshake_write_iv)
         additional_data = tlsct.type.to_bytes(
             1, "big") + tlsct.legacy_record_version.to_bytes(2, "big") + tlsct.length.to_bytes(2, "big")
-
         aesgcm = AESGCM(self.server_handshake_write_key)
         testdecrypt = aesgcm.decrypt(nonce, encbytes, additional_data)
-        print(testdecrypt)
         pass
 
-    def set_handshake_bytes(self, clienthello: tls.ClientHello, serverhello: tls.ServerHello):
-        hsbytes = clienthello.to_bytes() + serverhello.to_bytes()
+    def set_handshake_bytes(self, handshake: tls.Handshake, server_handshake: tls.Handshake):
+        hsbytes = handshake.to_bytes() + server_handshake.to_bytes()
         self.handshake_bytes = hsbytes
 
     def calculate_handshake_secrets(self, server_keyshare: bytes):
