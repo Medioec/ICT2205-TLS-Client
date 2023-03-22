@@ -167,11 +167,29 @@ def main():
                         encrypted_handshakes.append(record)
             for enc in encrypted_handshakes:
                 crypto.decrypt_handshake(enc)
+            # TODO Send handshake finished message
+            get_request = create_get_string()
+            tlsct = crypto.encrypt_message(get_request)
+            s.sendall(tlsct.to_bytes())
+            res = s.recv(999999999)
+            tlsinner = crypto.decrypt_message(res)
+            print(tlsinner.type)
+            print(tlsinner.content)
         except socket.gaierror:
             # this means could not resolve the host
             print(f"Could not find host {args.hostname}")
     return
 
+
+def create_get_string():
+    return (
+        "GET / HTTP/1.1\r\n"
+        "User-Agent: Eric/1.2\r\n"
+        "Host: google.com\r\n"
+        "Accept-Language: en-us\r\n"
+        "Accept-Encoding: gzip, deflate\r\n"
+        "Connection: Keep-Alive\r\n"
+        )
 
 def parse_server_hello(handshake: tls.Handshake, tls_list: list[tls.TLSRecordLayer], crypto: CryptoHandler):
     server_handshake = None

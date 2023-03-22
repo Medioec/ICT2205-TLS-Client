@@ -42,6 +42,38 @@ class CryptoHandler:
     def xor(self, b1: bytes, b2: bytes):
         return bytes(a ^ b for a, b in zip(b1, b2))
 
+    def encrypt_message(self, message: str) -> 'tls.TLSCiphertext':
+        tlsinnerbytes = tls.TLSInnerPlaintext(
+            message.encode(), tls.ContentType.application_data, b"").to_bytes()
+        enc_length = len(tlsinnerbytes)
+        additional_data = tls.ContentType.application_data.to_bytes(
+            1, "big") + b"\x03\x03" + enc_length.to_bytes(2, "big")
+        cipher = AESGCM(self.client_application_write_key)
+        padded_seq = self.sequence_number.to_bytes(
+            self.traffic_iv_length, "big")
+        nonce = self.xor(padded_seq, self.client_application_write_iv)
+        enc_bytes = cipher.encrypt(nonce, tlsinnerbytes, additional_data)
+        tlsct = tls.TLSCiphertext(
+            tls.ContentType.application_data, tls.TLS12_PROTOCOL_VERSION, enc_length, enc_bytes)
+        self.sequence_number += 1
+        return tlsct
+
+    def decrypt_message(self, raw_bytes: bytes) -> 'tls.TLSInnerPlaintext':
+        tlsct = tls.TLSCiphertext.from_bytes(raw_bytes)
+        print(tlsct.to_bytes().hex())
+        encbytes = tlsct.encrypted_record
+        # nonce as per section 5.3, rfc 8446
+        padded_seq = self.sequence_number.to_bytes(
+            self.traffic_iv_length, "big")
+        nonce = self.xor(padded_seq, self.server_handshake_write_iv)
+        additional_data = tlsct.type.to_bytes(
+            1, "big") + tlsct.legacy_record_version.to_bytes(2, "big") + tlsct.length.to_bytes(2, "big")
+        aesgcm = AESGCM(self.server_handshake_write_key)
+        decrypted = aesgcm.decrypt(nonce, encbytes, additional_data)
+        tlsinner = tls.TLSInnerPlaintext.from_bytes(decrypted)
+        self.sequence_number += 1
+        return tlsinner
+
     def decrypt_handshake(self, tlsct: tls.TLSCiphertext):
         encbytes = tlsct.encrypted_record
         # nonce as per section 5.3, rfc 8446
@@ -51,8 +83,11 @@ class CryptoHandler:
         additional_data = tlsct.type.to_bytes(
             1, "big") + tlsct.legacy_record_version.to_bytes(2, "big") + tlsct.length.to_bytes(2, "big")
         aesgcm = AESGCM(self.server_handshake_write_key)
-        testdecrypt = aesgcm.decrypt(nonce, encbytes, additional_data)
-        pass
+        decrypted = aesgcm.decrypt(nonce, encbytes, additional_data)
+        tlsinner = tls.TLSInnerPlaintext.from_bytes(decrypted)
+        # TODO replace with correct code, need unwrap?
+        self.full_handshake_bytes = self.handshake_bytes + tlsinner.content
+        self.sequence_number += 1
 
     def set_handshake_bytes(self, handshake: tls.Handshake, server_handshake: tls.Handshake):
         hsbytes = handshake.to_bytes() + server_handshake.to_bytes()
@@ -91,11 +126,21 @@ class CryptoHandler:
 
     def calculate_application_secrets(self):
         client_application_traffic_secret = self.derive_secret(
-            self.master_secret, "c ap traffic", self.full_handshake_bytes)
+            self.master_secret, "c ap traffic", self.full_handshake_bytes
+        )
+        server_application_traffic_secret = self.derive_secret(
+            self.master_secret, "s ap traffic", self.full_handshake_bytes
+        )
         self.client_application_write_key = self.hkdf_expand_label(
             client_application_traffic_secret, "key", b"", self.traffic_key_length)
         self.client_application_write_iv = self.hkdf_expand_label(
             client_application_traffic_secret, "iv", b"", self.traffic_iv_length)
+        self.server_application_write_key = self.hkdf_expand_label(
+            server_application_traffic_secret, "key", b"", self.traffic_key_length
+        )
+        self.server_application_write_iv = self.hkdf_expand_label(
+            server_application_traffic_secret, "iv", b"", self.traffic_iv_length
+        )
 
     def gen_0_bytes(self) -> bytearray:
         return bytearray(self.hash_length)
@@ -142,7 +187,8 @@ class CryptoHandler:
         labellen = len(labelstring).to_bytes(1, "big")
         contextlen = len(context).to_bytes(1, "big")
         hkdf_label = (
-            length.to_bytes(2, "big") + labellen + labelstring.encode() + contextlen + context
+            length.to_bytes(2, "big") + labellen +
+            labelstring.encode() + contextlen + context
         )
         res = hkdf.hkdf_expand(
             secret, hkdf_label, length, hash=self.hashlib_algo)
@@ -153,16 +199,12 @@ class CryptoHandler:
 
     def print_secrets(self):
         print(
-            f"{'ECDH secret:':20}"
-            + self.ecdh_secret.hex()
-            + "\n"
-            + f"{'Early secret:':20}"
-            + self.early_secret.hex()
-            + "\n"
-            + f"{'Handshake secret:':20}"
-            + self.handshake_secret.hex()
-            + "\n"
-            + f"{'Master secret:':20}"
-            + self.master_secret.hex()
-            + "\n"
+            f"{'ECDH secret:':20} {self.ecdh_secret.hex()}\n"
+            f"{'Early secret:':20} {self.early_secret.hex()}\n"
+            f"{'Handshake secret:':20} {self.handshake_secret.hex()}\n"
+            f"{'Master secret:':20} {self.master_secret.hex()}\n"
+            f"{'Client hs key:':20} {self.client_handshake_write_key.hex()}\n"
+            f"{'Client hs iv:':20} {self.client_handshake_write_iv.hex()}\n"
+            f"{'Server hs key:':20} {self.server_handshake_write_key.hex()}\n"
+            f"{'Server hs iv:':20} {self.server_handshake_write_iv.hex()}\n"
         )

@@ -107,16 +107,38 @@ class TLSInnerPlaintext:
     content: bytes
     type: ContentType
     zeros: bytes
+    TLS_INNER_SIZE_LIMIT = 0x4001
 
     def to_bytes(self) -> bytes:
         return self.content + struct.pack("!B", self.type.value) + self.zeros
 
     @classmethod
-    def from_bytes(cls, data: bytes) -> 'TLSInnerPlaintext':
+    def from_bytes2(cls, data: bytes) -> 'TLSInnerPlaintext':
         type = ContentType(data[-1])
         zeros = data[-1:]
         content = data[:-1]
         return cls(content, type, zeros)
+
+    def to_bytes(self) -> bytes:
+        if not self.is_valid_length():
+            raise Exception(f"TLSInnerPlaintext exceeds size limit of {self.TLS_INNER_SIZE_LIMIT} bytes.")
+        return self.content + struct.pack('!B', self.type.value) + self.zeros
+
+    @classmethod
+    def from_bytes(cls, data):
+        n: int
+        type: ContentType
+        for index, byte in reversed(list(enumerate(data))):
+            if byte == b'\x00':
+                continue
+            n = index
+            type = int(byte)
+            break
+        content = data[:n]
+        return cls(content, type, data[n + 1:])
+
+    def is_valid_length(self) -> bool:
+        return len(self.content) + len(self.zeros) + 1 <= self.TLS_INNER_SIZE_LIMIT
 
 
 @dataclass
