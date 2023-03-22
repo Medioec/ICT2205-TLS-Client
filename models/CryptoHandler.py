@@ -3,6 +3,7 @@ import hkdf
 import hashlib
 
 from Crypto.Cipher import AES
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from models.ECDH import *
 
@@ -49,11 +50,11 @@ class CryptoHandler:
         nonce = self.xor(padded_seq, self.server_handshake_write_iv)
         additional_data = tlsct.type.to_bytes(
             1, "big") + tlsct.legacy_record_version.to_bytes(2, "big") + tlsct.length.to_bytes(2, "big")
-        print(additional_data.hex())
-        cipher = AES.new(self.server_handshake_write_key,
-                         AES.MODE_GCM, nonce=nonce)
-        decrypted = cipher.decrypt_and_verify(encbytes, additional_data)
-        print(decrypted.hex())
+        
+        
+        aesgcm = AESGCM(self.server_handshake_write_key)
+        testdecrypt = aesgcm.decrypt(nonce, encbytes, additional_data)
+        print(testdecrypt)
         pass
 
     def set_handshake_bytes(self, clienthello: tls.ClientHello, serverhello: tls.ServerHello):
