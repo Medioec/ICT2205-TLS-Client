@@ -67,11 +67,12 @@ class CryptoHandler:
         zeros = self.gen_0_bytes()
         self.early_secret = self.hkdf_extract(zeros, zeros)
         self.handshake_secret = self.hkdf_extract(
-            self.ecdh_secret, self.derive_secret(
-                self.early_secret, "derived", b"")
+            self.derive_secret(self.early_secret, "derived", b""),
+            self.ecdh_secret
         )
         self.master_secret = self.hkdf_extract(
-            zeros, self.derive_secret(self.handshake_secret, "derived", b"")
+            self.derive_secret(self.handshake_secret, "derived", b""),
+            zeros
         )
 
         client_handshake_traffic_secret = self.derive_secret(
@@ -86,6 +87,10 @@ class CryptoHandler:
             server_handshake_traffic_secret, "key", b"", self.traffic_key_length)
         self.server_handshake_write_iv = self.hkdf_expand_label(
             server_handshake_traffic_secret, "iv", b"", self.traffic_iv_length)
+        print(self.client_handshake_write_key.hex())
+        print(self.client_handshake_write_iv.hex())
+        print(self.server_handshake_write_key.hex())
+        print(self.server_handshake_write_iv.hex())
 
     def calculate_application_secrets(self):
         client_application_traffic_secret = self.derive_secret(
@@ -136,9 +141,11 @@ class CryptoHandler:
     def hkdf_expand_label(
         self, secret: bytes, label: str, context: bytes, length: int
     ) -> bytes:
+        labelstring = "tls13 " + label
+        labellen = len(labelstring).to_bytes(1, "big")
+        contextlen = len(context).to_bytes(1, "big")
         hkdf_label = (
-            length.to_bytes(2, "big") + bytes("tls13 " +
-                                              label, "utf-8") + context
+            length.to_bytes(2, "big") + labellen + labelstring.encode() + contextlen + context
         )
         res = hkdf.hkdf_expand(
             secret, hkdf_label, length, hash=self.hashlib_algo)
