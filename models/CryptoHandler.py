@@ -1,6 +1,7 @@
 import tls
 import hkdf
 import hashlib
+import hmac
 
 from Crypto.Cipher import AES
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -15,6 +16,7 @@ class CryptoHandler:
     hash_length: int
     traffic_key_length: int
     traffic_iv_length: int
+    auth_tag_length: int
 
     ecdhparam: ECDH = None
 
@@ -24,8 +26,10 @@ class CryptoHandler:
     master_secret: bytes
 
     handshake_bytes: bytes
+    # verification as per 4.4
+    client_handshake_context: bytes
+    server_handshake_context: bytes
     full_handshake_bytes: bytes
-    transcript_hash: bytes
 
     client_handshake_write_key: bytes
     client_handshake_write_iv: bytes
@@ -33,61 +37,137 @@ class CryptoHandler:
     server_handshake_write_iv: bytes
 
     # 64 bit sequence number
-    sequence_number: int
+    server_sequence_number: int
+    client_sequence_number: int
 
     def __init__(self, curve: str):
         self.ecdhparam = ECDH(curve)
-        self.sequence_number = 0
+        self.server_sequence_number = 0
+        self.client_sequence_number = 0
 
     def xor(self, b1: bytes, b2: bytes):
         return bytes(a ^ b for a, b in zip(b1, b2))
 
+    def get_next_server_nonce(self, iv: bytes) -> bytes:
+        padded_seq = self.server_sequence_number.to_bytes(
+            self.traffic_iv_length, "big")
+        nonce = self.xor(padded_seq, iv)
+        self.server_sequence_number += 1
+        return nonce
+
+    def get_next_client_nonce(self, iv: bytes) -> bytes:
+        padded_seq = self.client_sequence_number.to_bytes(
+            self.traffic_iv_length, "big")
+        nonce = self.xor(padded_seq, iv)
+        self.client_sequence_number += 1
+        return nonce
+
     def encrypt_message(self, message: str) -> 'tls.TLSCiphertext':
         tlsinnerbytes = tls.TLSInnerPlaintext(
             message.encode(), tls.ContentType.application_data, b"").to_bytes()
-        enc_length = len(tlsinnerbytes)
+        enc_length = len(tlsinnerbytes) + self.auth_tag_length
         additional_data = tls.ContentType.application_data.to_bytes(
             1, "big") + b"\x03\x03" + enc_length.to_bytes(2, "big")
         cipher = AESGCM(self.client_application_write_key)
-        padded_seq = self.sequence_number.to_bytes(
-            self.traffic_iv_length, "big")
-        nonce = self.xor(padded_seq, self.client_application_write_iv)
+        nonce = self.get_next_client_nonce(self.client_application_write_iv)
         enc_bytes = cipher.encrypt(nonce, tlsinnerbytes, additional_data)
         tlsct = tls.TLSCiphertext(
             tls.ContentType.application_data, tls.TLS12_PROTOCOL_VERSION, enc_length, enc_bytes)
-        self.sequence_number += 1
         return tlsct
 
-    def decrypt_message(self, raw_bytes: bytes) -> 'tls.TLSInnerPlaintext':
-        tlsct = tls.TLSCiphertext.from_bytes(raw_bytes)
-        encbytes = tlsct.encrypted_record
-        # nonce as per section 5.3, rfc 8446
-        padded_seq = self.sequence_number.to_bytes(
-            self.traffic_iv_length, "big")
-        nonce = self.xor(padded_seq, self.server_handshake_write_iv)
+    def decrypt_application_ct(self, tlsct: tls.TLSCiphertext) -> bytes:
+        enc_bytes = tlsct.encrypted_record
+        nonce = self.get_next_server_nonce(self.server_application_write_iv)
         additional_data = tlsct.type.to_bytes(
             1, "big") + tlsct.legacy_record_version.to_bytes(2, "big") + tlsct.length.to_bytes(2, "big")
-        aesgcm = AESGCM(self.server_handshake_write_key)
-        decrypted = aesgcm.decrypt(nonce, encbytes, additional_data)
-        tlsinner = tls.TLSInnerPlaintext.from_bytes(decrypted)
-        self.sequence_number += 1
-        return tlsinner
+        aesgcm = AESGCM(self.server_application_write_key)
+        decrypted = aesgcm.decrypt(nonce, enc_bytes, additional_data)
+        return decrypted
+
+    def decrypt_application_bytes(self, raw_bytes: bytes) -> str:
+        tls_rl = tls.TLSRecordLayer.parse_records(raw_bytes)
+        decrypted: list[bytes] = []
+        for tlsct in tls_rl.records:
+            decrypted.append(self.decrypt_application_ct(tlsct))
+        text = ""
+        print("\n\nServer Response:\n\n")
+        for data in decrypted:
+            try:
+                text += data.decode()
+            except Exception:
+                print("\n\nNon-text data: " + data.hex() + "\n\n")
+        print("Text:\n" + text)
+        return text
 
     def decrypt_handshake(self, tlsct: tls.TLSCiphertext):
         encbytes = tlsct.encrypted_record
         # nonce as per section 5.3, rfc 8446
-        padded_seq = self.sequence_number.to_bytes(
-            self.traffic_iv_length, "big")
-        nonce = self.xor(padded_seq, self.server_handshake_write_iv)
+        nonce = self.get_next_server_nonce(self.server_handshake_write_iv)
         additional_data = tlsct.type.to_bytes(
             1, "big") + tlsct.legacy_record_version.to_bytes(2, "big") + tlsct.length.to_bytes(2, "big")
         aesgcm = AESGCM(self.server_handshake_write_key)
         decrypted = aesgcm.decrypt(nonce, encbytes, additional_data)
         tlsinner = tls.TLSInnerPlaintext.from_bytes(decrypted)
         # TODO replace with correct code, need unwrap?
-        print(tlsinner.to_bytes().hex())
-        self.full_handshake_bytes = self.handshake_bytes + tlsinner.content
-        self.sequence_number += 1
+        hslist = tlsinner.parse_encrypted_handshake()
+        self.client_handshake_context = self.handshake_bytes
+        self.server_handshake_context = self.handshake_bytes
+        enc_ext = cert = certverify = finished = bytes()
+        finished_hs: tls.Handshake = None
+        print("Decrypting server handshake response: ")
+        for hs in hslist:
+            if hs.msg_type == 11:
+                print("Cert found")
+                cert = hs.to_bytes()
+            elif hs.msg_type == 15:
+                print("Cert verify found")
+                certverify = hs.to_bytes()
+            elif hs.msg_type == 8:
+                print("Encrypted extensions found")
+                enc_ext = hs.to_bytes()
+            elif hs.msg_type == 20:
+                print("Finished found")
+                finished = hs.to_bytes()
+        self.client_handshake_context += enc_ext + cert + certverify + finished
+        self.server_handshake_context += enc_ext + cert + certverify
+        # Calculate verify_data as per 4.4.4
+        finished_key = self.hkdf_expand_label(
+            self.server_handshake_traffic_secret, "finished", b"", self.hash_length)
+        server_mac = hmac.new(finished_key, self.transcript_hash(
+            self.server_handshake_context), self.hashlib_algo)
+        verify_data = server_mac.digest()
+        if finished_hs is not None and verify_data != finished_hs.data:
+            raise Exception("Calculated MAC is different from server MAC")
+
+    def generate_client_finished_handshake(self) -> 'tls.TLSCiphertext':
+        finished_key = self.hkdf_expand_label(
+            self.client_handshake_traffic_secret, "finished", b"", self.hash_length)
+        client_mac = hmac.new(finished_key, self.transcript_hash(
+            self.client_handshake_context), self.hashlib_algo)
+        verify_data = client_mac.digest()
+        contenttype = tls.ContentType.application_data
+        version = tls.TLS12_PROTOCOL_VERSION
+        tlsinnerdata = tls.Handshake(
+            tls.HandshakeType.finished, len(verify_data), data=verify_data)
+        tlsinnerpt = tls.TLSInnerPlaintext(
+            tlsinnerdata.to_bytes(), tls.ContentType.handshake, b"")
+        ctlen = len(tlsinnerpt.to_bytes()) + self.auth_tag_length
+        additional_data = contenttype.to_bytes(
+            1, "big") + version.to_bytes(2, "big") + ctlen.to_bytes(2, "big")
+
+        nonce = self.get_next_client_nonce(self.client_handshake_write_iv)
+        enc_bytes = self.encrypt_bytes(tlsinnerpt.to_bytes(
+        ), additional_data, self.client_handshake_write_key, nonce)
+        tlsct = tls.TLSCiphertext(contenttype, version, ctlen, enc_bytes)
+        self.client_sequence_number = 0
+        self.server_sequence_number = 0
+        return tlsct
+
+    def generate_change_cipher_spec(self) -> 'tls.TLSPlaintext':
+        return tls.TLSPlaintext(tls.ContentType.change_cipher_spec, tls.TLS12_PROTOCOL_VERSION, 1, b"\x01")
+
+    def encrypt_bytes(self, data: bytes, additional_data: bytes, key: bytes, nonce: bytes):
+        return AESGCM(key).encrypt(nonce, data, additional_data)
 
     def set_handshake_bytes(self, handshake: tls.Handshake, server_handshake: tls.Handshake):
         hsbytes = handshake.to_bytes() + server_handshake.to_bytes()
@@ -107,25 +187,25 @@ class CryptoHandler:
             zeros
         )
 
-        client_handshake_traffic_secret = self.derive_secret(
+        self.client_handshake_traffic_secret = self.derive_secret(
             self.handshake_secret, "c hs traffic", self.handshake_bytes)
-        server_handshake_traffic_secret = self.derive_secret(
+        self.server_handshake_traffic_secret = self.derive_secret(
             self.handshake_secret, "s hs traffic", self.handshake_bytes)
         self.client_handshake_write_key = self.hkdf_expand_label(
-            client_handshake_traffic_secret, "key", b"", self.traffic_key_length)
+            self.client_handshake_traffic_secret, "key", b"", self.traffic_key_length)
         self.client_handshake_write_iv = self.hkdf_expand_label(
-            client_handshake_traffic_secret, "iv", b"", self.traffic_iv_length)
+            self.client_handshake_traffic_secret, "iv", b"", self.traffic_iv_length)
         self.server_handshake_write_key = self.hkdf_expand_label(
-            server_handshake_traffic_secret, "key", b"", self.traffic_key_length)
+            self.server_handshake_traffic_secret, "key", b"", self.traffic_key_length)
         self.server_handshake_write_iv = self.hkdf_expand_label(
-            server_handshake_traffic_secret, "iv", b"", self.traffic_iv_length)
+            self.server_handshake_traffic_secret, "iv", b"", self.traffic_iv_length)
 
     def calculate_application_secrets(self):
         client_application_traffic_secret = self.derive_secret(
-            self.master_secret, "c ap traffic", self.full_handshake_bytes
+            self.master_secret, "c ap traffic", self.client_handshake_context
         )
         server_application_traffic_secret = self.derive_secret(
-            self.master_secret, "s ap traffic", self.full_handshake_bytes
+            self.master_secret, "s ap traffic", self.client_handshake_context
         )
         self.client_application_write_key = self.hkdf_expand_label(
             client_application_traffic_secret, "key", b"", self.traffic_key_length)
@@ -158,11 +238,13 @@ class CryptoHandler:
             self.hashlib_algo = hashlib.sha384
             self.traffic_key_length = 32
             self.traffic_iv_length = 12
+            self.auth_tag_length = 16
         elif cipher_suite in sha256_ciphers and cipher_suite in aes128_ciphers:
             self.hash_length = 32
             self.hashlib_algo = hashlib.sha256
             self.traffic_key_length = 16
             self.traffic_iv_length = 12
+            self.auth_tag_length = 16
         elif cipher_suite == tls.TLS_CHACHA20_POLY1305_SHA256:
             self.hash_length = 32
             self.hashlib_algo = hashlib.sha256
@@ -172,8 +254,11 @@ class CryptoHandler:
             raise Exception("Error setting cipher suite")
 
     def derive_secret(self, secret: bytes, label: str, messages: bytes) -> bytes:
-        transcript_hash = self.hashlib_algo(messages).digest()
+        transcript_hash = self.transcript_hash(messages)
         return self.hkdf_expand_label(secret, label, transcript_hash, self.hash_length)
+
+    def transcript_hash(self, context: bytes) -> bytes:
+        return self.hashlib_algo(context).digest()
 
     # length: length in bytes
     def hkdf_expand_label(
@@ -203,4 +288,8 @@ class CryptoHandler:
             f"{'Client hs iv:':20} {self.client_handshake_write_iv.hex()}\n"
             f"{'Server hs key:':20} {self.server_handshake_write_key.hex()}\n"
             f"{'Server hs iv:':20} {self.server_handshake_write_iv.hex()}\n"
+            f"{'Client app key: ':20} {self.client_application_write_key.hex()}\n"
+            f"{'Client app iv: ':20} {self.client_application_write_iv.hex()}\n"
+            f"{'Server app key: ':20} {self.server_application_write_key.hex()}\n"
+            f"{'Server app iv: ':20} {self.server_application_write_iv.hex()}\n"
         )

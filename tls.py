@@ -139,13 +139,13 @@ class TLSInnerPlaintext:
 
     def is_valid_length(self) -> bool:
         return len(self.content) + len(self.zeros) + 1 <= self.TLS_INNER_SIZE_LIMIT
-    
-    def parse_encrypted_handshake(self):
+
+    def parse_encrypted_handshake(self) -> 'list[Handshake]':
         hslist = []
         content_size = len(self.content)
         start = 0
         while start < content_size:
-            hstype = int.from_bytes(self.content[start:1], "big")
+            hstype = int.from_bytes(self.content[start:start + 1], "big")
             length = int.from_bytes(self.content[start+1:start+4], "big")
             data = self.content[start+4:start+4+length]
             hslist.append(Handshake(hstype, length, data=data))
@@ -289,8 +289,9 @@ class Handshake:
             server_hello = self.server_hello.to_bytes()
             return msg_type + length + server_hello
         else:
-            raise ValueError("Either client_hello or server_hello must be set")
-
+            # temp comment
+            # raise ValueError("Either client_hello or server_hello must be set")
+            return msg_type + length + self.data
 
 class ClientHello:
     def __init__(self, random_bytes, legacy_session_id, extensions):

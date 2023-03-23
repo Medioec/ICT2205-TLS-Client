@@ -2,6 +2,7 @@ import argparse
 import re
 import secrets
 import socket
+import time
 import tls
 import tls_constants
 import x25519
@@ -159,7 +160,6 @@ def main():
             # TODO ECDHE calculation for decryption of server certs, verify server certs
             # rfc7748
             crypto.calculate_handshake_secrets(crypto.key_share_entry.key_exchange)
-            crypto.print_secrets()
             encrypted_handshakes: list[tls.TLSCiphertext] = []
             for packet in tls_list:
                 for record in packet.records:
@@ -168,13 +168,18 @@ def main():
             for enc in encrypted_handshakes:
                 crypto.decrypt_handshake(enc)
             # TODO Send handshake finished message
+            changecs = crypto.generate_change_cipher_spec()
+            tlsct = crypto.generate_client_finished_handshake()
+            s.sendall(changecs.to_bytes())
+            s.sendall(tlsct.to_bytes())
+            print("Completed handshake\n\n")
+            crypto.calculate_application_secrets()
+            crypto.print_secrets()
             get_request = create_get_string()
             tlsct = crypto.encrypt_message(get_request)
             s.sendall(tlsct.to_bytes())
-            res = s.recv(999999999)
-            tlsinner = crypto.decrypt_message(res)
-            print(tlsinner.type)
-            print(tlsinner.content)
+            res = recvall(s, 999999999)
+            text = crypto.decrypt_application_bytes(res)
         except socket.gaierror:
             # this means could not resolve the host
             print(f"Could not find host {args.hostname}")
@@ -189,6 +194,7 @@ def create_get_string():
         "Accept-Language: en-us\r\n"
         "Accept-Encoding: gzip, deflate\r\n"
         "Connection: Keep-Alive\r\n"
+        "\r\n"
         )
 
 def recvall(sock:socket.socket, n):
@@ -226,7 +232,7 @@ def parse_server_hello(handshake: tls.Handshake, tls_list: list[tls.TLSRecordLay
     ################
     crypto.set_handshake_bytes(handshake, server_handshake)
 
-
+# return true if completed handshake found
 def verify_response(
     clienthello: tls.ClientHello, server_response: bytes, s: socket
 ) -> Tuple[bool, tls.ClientHello, tls.TLSRecordLayer]:
@@ -235,7 +241,7 @@ def verify_response(
     handshake = recordlayer.parse_handshake()
     if handshake == None or handshake.server_hello == None:
         # no handshake found
-        return
+        return False, None, None
     res, clienthello, serverhello = check_server_hello(
         handshake.server_hello, clienthello
     )
