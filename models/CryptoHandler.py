@@ -60,7 +60,6 @@ class CryptoHandler:
 
     def decrypt_message(self, raw_bytes: bytes) -> 'tls.TLSInnerPlaintext':
         tlsct = tls.TLSCiphertext.from_bytes(raw_bytes)
-        print(tlsct.to_bytes().hex())
         encbytes = tlsct.encrypted_record
         # nonce as per section 5.3, rfc 8446
         padded_seq = self.sequence_number.to_bytes(
@@ -86,6 +85,7 @@ class CryptoHandler:
         decrypted = aesgcm.decrypt(nonce, encbytes, additional_data)
         tlsinner = tls.TLSInnerPlaintext.from_bytes(decrypted)
         # TODO replace with correct code, need unwrap?
+        print(tlsinner.to_bytes().hex())
         self.full_handshake_bytes = self.handshake_bytes + tlsinner.content
         self.sequence_number += 1
 
@@ -119,10 +119,6 @@ class CryptoHandler:
             server_handshake_traffic_secret, "key", b"", self.traffic_key_length)
         self.server_handshake_write_iv = self.hkdf_expand_label(
             server_handshake_traffic_secret, "iv", b"", self.traffic_iv_length)
-        print(self.client_handshake_write_key.hex())
-        print(self.client_handshake_write_iv.hex())
-        print(self.server_handshake_write_key.hex())
-        print(self.server_handshake_write_iv.hex())
 
     def calculate_application_secrets(self):
         client_application_traffic_secret = self.derive_secret(

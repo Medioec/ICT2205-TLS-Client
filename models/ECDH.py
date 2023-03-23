@@ -19,8 +19,8 @@ class ECDH:
         self.private = secrets.token_bytes(32)
 
     def generate_shared_secret(self, server_public: bytes) -> bytes:
-        self.server_public = server_public
-        self.shared_secret = x25519.scalar_mult(self.private, server_public)
+        self.server_public = bytes(server_public)
+        self.shared_secret = x25519.scalar_mult(self.private, self.server_public)
         return self.shared_secret
 
     def sanity_check(self):

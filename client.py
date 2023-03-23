@@ -150,7 +150,7 @@ def main():
             done = False
             tls_list: list[tls.TLSRecordLayer] = []
             while not done:
-                sh_bytes = s.recv(16384)
+                sh_bytes = recvall(s, 32000)
                 done, clienthello, tls_record_layer = verify_response(
                     clienthello, sh_bytes, s
                 )
@@ -190,6 +190,20 @@ def create_get_string():
         "Accept-Encoding: gzip, deflate\r\n"
         "Connection: Keep-Alive\r\n"
         )
+
+def recvall(sock:socket.socket, n):
+    # Helper function to recv n bytes or return None if EOF is hit
+    sock.settimeout(1)
+    data = bytearray()
+    while len(data) < n:
+        try:
+            packet = sock.recv(n - len(data))
+            if not packet:
+                return None
+            data.extend(packet)
+        except TimeoutError:
+            break
+    return data
 
 def parse_server_hello(handshake: tls.Handshake, tls_list: list[tls.TLSRecordLayer], crypto: CryptoHandler):
     server_handshake = None

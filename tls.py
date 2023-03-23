@@ -132,14 +132,25 @@ class TLSInnerPlaintext:
             if byte == b'\x00':
                 continue
             n = index
-            type = int(byte)
+            type = ContentType(int(byte))
             break
         content = data[:n]
         return cls(content, type, data[n + 1:])
 
     def is_valid_length(self) -> bool:
         return len(self.content) + len(self.zeros) + 1 <= self.TLS_INNER_SIZE_LIMIT
-
+    
+    def parse_encrypted_handshake(self):
+        hslist = []
+        content_size = len(self.content)
+        start = 0
+        while start < content_size:
+            hstype = int.from_bytes(self.content[start:1], "big")
+            length = int.from_bytes(self.content[start+1:start+4], "big")
+            data = self.content[start+4:start+4+length]
+            hslist.append(Handshake(hstype, length, data=data))
+            start += 4 + length
+        return hslist
 
 @dataclass
 class TLSCiphertext(TLSRecord):
@@ -156,7 +167,7 @@ class TLSCiphertext(TLSRecord):
     def from_bytes(cls, data: bytes) -> 'TLSCiphertext':
         opaque_type, legacy_record_version = struct.unpack("!BH", data[:3])
         (length,) = struct.unpack("!H", data[3:5])
-        encrypted_record = data[5 : 5 + length]
+        encrypted_record = bytes(data[5 : 5 + length])
         return cls(
             ContentType(opaque_type), legacy_record_version, length, encrypted_record
         )
@@ -250,6 +261,7 @@ class Handshake:
     length: int
     client_hello: "ClientHello" = None
     server_hello: "ServerHello" = None
+    data: bytes = None
 
     @classmethod
     def from_bytes(cls, data: bytes):
