@@ -1,0 +1,5 @@
+cryptography==37.0.4
+hkdf==0.0.3
+pycryptodome==3.17
+scapy==2.4.5
+x25519==0.0.2
