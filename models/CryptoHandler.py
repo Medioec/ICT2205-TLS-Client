@@ -3,17 +3,12 @@ import hkdf
 import hashlib
 import hmac
 
-<<<<<<< Updated upstream
-=======
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 import base64
 import re
-#from crypto.Cipher import AES
->>>>>>> Stashed changes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-
 from models.ECDH import *
 
 
