@@ -3,6 +3,15 @@ import hkdf
 import hashlib
 import hmac
 
+<<<<<<< Updated upstream
+=======
+from cryptography import x509
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import serialization
+import base64
+import re
+#from crypto.Cipher import AES
+>>>>>>> Stashed changes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from models.ECDH import *
@@ -139,7 +148,7 @@ class CryptoHandler:
                 print(TotalSize)
                 iteratorFront = 4 
                 iteratorBack = 7
-                
+                certificates = []
                 while iteratorBack <= TotalSize + 4:
                     #this part handles data
                     print("Size of sector")
@@ -151,8 +160,40 @@ class CryptoHandler:
                     iteratorBack = iteratorBack + certCalInt
                     print("Data of sector")
                     print (certItSelf[iteratorFront:iteratorBack].hex()) # this print data itself
-      
+                    # Your X.509 certificate in hex format (as a string)
+                    hex_cert = certItSelf[iteratorFront:iteratorBack].hex()
+                    # Convert the hex string to binary (DER) format
+                    der_cert = bytes.fromhex(hex_cert)
+                    # Parse the binary (DER) certificate
+                    Server_hs_cert = x509.load_der_x509_certificate(der_cert, default_backend())
 
+                    found_match = False
+
+                    with open("IncludedRootsPEM.txt", "rb") as f:
+                        root_ca_pem = f.read()
+                        regex_pattern = b"-----BEGIN CERTIFICATE-----\r?\n(.*?)\r?\n-----END CERTIFICATE-----"
+                        matches = re.findall(regex_pattern, root_ca_pem, re.DOTALL)
+
+                        # Decoding the certificates and creating a list of certificates in PEM format
+                        certificates = [b"-----BEGIN CERTIFICATE-----\n" + match + b"\n-----END CERTIFICATE-----" for match in matches]
+
+                    for cert_pem in certificates:
+                        root_ca_cert = x509.load_pem_x509_certificate(cert_pem, default_backend())
+
+                        # Compare the certificates' public keys
+                        if Server_hs_cert.public_key().public_bytes(
+                                encoding=serialization.Encoding.PEM,
+                                format=serialization.PublicFormat.SubjectPublicKeyInfo
+                        ) == root_ca_cert.public_key().public_bytes(
+                            encoding=serialization.Encoding.PEM,
+                            format=serialization.PublicFormat.SubjectPublicKeyInfo
+                        ):
+                            print(f"The certificate matches the root CA in IncludedRootsPEM.txt")
+                            found_match = True
+                            break
+
+                    if not found_match:
+                        print("The certificate doesn't match any of the root CA files.")
 
                     #this part handles ext
                     iteratorFront = iteratorBack
@@ -352,3 +393,4 @@ class CryptoHandler:
             f"{'Server app key: ':20} {self.server_application_write_key.hex()}\n"
             f"{'Server app iv: ':20} {self.server_application_write_iv.hex()}\n"
         )
+
