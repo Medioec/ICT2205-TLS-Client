@@ -638,7 +638,7 @@ class SupportedVersions:
 
     def to_bytes(self):
         if self.msg_type == HandshakeType.client_hello:  # client_hello
-
+         
             num_versions = struct.pack("!B", len(self.versions) * 2)
             versions = b"".join([struct.pack("!H", v) for v in self.versions])
 
@@ -664,6 +664,7 @@ class SupportedVersions:
         elif msg_type == HandshakeType.server_hello:
             selected_version = data[2:4]
             return cls(msg_type, selected_version=selected_version)
+
 
 
 @dataclass

@@ -3,7 +3,7 @@ import hkdf
 import hashlib
 import hmac
 
-from Crypto.Cipher import AES
+#from crypto.Cipher import AES
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from models.ECDH import *
@@ -108,6 +108,7 @@ class CryptoHandler:
         aesgcm = AESGCM(self.server_handshake_write_key)
         decrypted = aesgcm.decrypt(nonce, encbytes, additional_data)
         tlsinner = tls.TLSInnerPlaintext.from_bytes(decrypted)
+
         # TODO replace with correct code, need unwrap?
         hslist = tlsinner.parse_encrypted_handshake()
         self.client_handshake_context = self.handshake_bytes
@@ -119,6 +120,63 @@ class CryptoHandler:
             if hs.msg_type == 11:
                 print("Cert found")
                 cert = hs.to_bytes()
+
+
+                print("\n\nCert is confirm in here somewhere \n\n")
+
+
+                certItSelf = hs.data
+
+                if int.from_bytes(certItSelf[0:1], "big") == 0:
+                    print("This shit is X509")
+                elif int.from_bytes(certItSelf[0:1], "big") == 2:
+                    print("This shit is RawPublicKey")
+
+                TotalSize = int.from_bytes(certItSelf[1:4], "big") # calculate size of cert
+                
+                print ("Total Size of cert is: ")
+                print(TotalSize)
+                iteratorFront = 4 
+                iteratorBack = 7
+                
+                while iteratorBack <= TotalSize + 4:
+                    #this part handles data
+                    print("Size of sector")
+                    print (certItSelf[iteratorFront:iteratorBack].hex()) # this print size of data
+                    certCalInt = int.from_bytes(certItSelf[iteratorFront:iteratorBack], "big")
+                    print("Size of sector in int")
+                    print (certCalInt) # this print the size of data in int
+                    iteratorFront = iteratorBack
+                    iteratorBack = iteratorBack + certCalInt
+                    print("Data of sector")
+                    print (certItSelf[iteratorFront:iteratorBack].hex()) # this print data itself
+      
+
+
+                    #this part handles ext
+                    iteratorFront = iteratorBack
+                    iteratorBack = iteratorBack + 2
+                    print("Size of extensions")
+                    print (certItSelf[iteratorFront:iteratorBack].hex()) # this print size of ext
+                    certCalInt = int.from_bytes(certItSelf[iteratorFront:iteratorBack], "big") 
+                    print("Size of extensions in int")
+                    print (certCalInt) # this print the size of ext in int
+                    iteratorFront = iteratorBack
+                    iteratorBack = iteratorBack + certCalInt
+                    print("Data of extensions")
+                    print (certItSelf[iteratorFront:iteratorBack].hex()) # this print ext itself
+              
+
+                    #set up for next loop
+                    iteratorFront = iteratorBack
+                    iteratorBack = iteratorBack + 3
+  
+
+
+                print("\n\nCert is confirm up there somewhere \n\n")
+
+
+
             elif hs.msg_type == 15:
                 print("Cert verify found")
                 certverify = hs.to_bytes()
