@@ -3,7 +3,6 @@ import hkdf
 import hashlib
 import hmac
 
-from Crypto.Cipher import AES
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from models.ECDH import *

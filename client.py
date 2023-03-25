@@ -2,10 +2,8 @@ import argparse
 import re
 import secrets
 import socket
-import time
 import tls
 import tls_constants
-import x25519
 
 from typing import Tuple
 from models.CryptoHandler import *
@@ -205,11 +203,11 @@ def recvall(sock:socket.socket, n):
         try:
             packet = sock.recv(n - len(data))
             if not packet:
-                return None
+                return bytes(data)
             data.extend(packet)
         except TimeoutError:
             break
-    return data
+    return bytes(data)
 
 def parse_server_hello(handshake: tls.Handshake, tls_list: list[tls.TLSRecordLayer], crypto: CryptoHandler):
     server_handshake = None
