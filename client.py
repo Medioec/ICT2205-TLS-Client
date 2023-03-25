@@ -68,7 +68,7 @@ def main():
             x25519_public = crypto.ecdhparam.public
             ip = socket.gethostbyname(args.hostname)
             print("Destination ip: " + ip)
-            clientrandom = secrets.token_bytes(32)
+            clientrandom = crypto.clientrandom = secrets.token_bytes(32)
             legacy_session_id = secrets.token_bytes(32)
             sni = tls.ServerName(tls.NameType.host_name, args.hostname)
             snilist = tls.ServerNameList([sni])
@@ -133,6 +133,7 @@ def main():
                 + psk_key_exchange_modes.to_bytes()
                 + keyshare.to_bytes()
             )
+            # TODO fix client hello?
             clienthello = tls.ClientHello(clientrandom, legacy_session_id, extensions)
             handshake = tls.Handshake(
                 tls.HandshakeType.client_hello, len(clienthello.to_bytes()), clienthello
@@ -155,8 +156,6 @@ def main():
                 )
                 tls_list.append(tls_record_layer)
             parse_server_hello(handshake, tls_list, crypto)
-            # TODO ECDHE calculation for decryption of server certs, verify server certs
-            # rfc7748
             crypto.calculate_handshake_secrets(crypto.key_share_entry.key_exchange)
             encrypted_handshakes: list[tls.TLSCiphertext] = []
             for packet in tls_list:
@@ -165,7 +164,6 @@ def main():
                         encrypted_handshakes.append(record)
             for enc in encrypted_handshakes:
                 crypto.decrypt_handshake(enc)
-            # TODO Send handshake finished message
             changecs = crypto.generate_change_cipher_spec()
             tlsct = crypto.generate_client_finished_handshake()
             s.sendall(changecs.to_bytes())

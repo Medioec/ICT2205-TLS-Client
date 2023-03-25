@@ -3,7 +3,6 @@ import hkdf
 import hashlib
 import hmac
 
-#from crypto.Cipher import AES
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from models.ECDH import *
@@ -19,6 +18,8 @@ class CryptoHandler:
     auth_tag_length: int
 
     ecdhparam: ECDH = None
+
+    clientrandom: bytes
 
     early_secret: bytes
     ecdh_secret: bytes
@@ -259,21 +260,21 @@ class CryptoHandler:
             self.server_handshake_traffic_secret, "iv", b"", self.traffic_iv_length)
 
     def calculate_application_secrets(self):
-        client_application_traffic_secret = self.derive_secret(
+        self.client_application_traffic_secret = self.derive_secret(
             self.master_secret, "c ap traffic", self.client_handshake_context
         )
-        server_application_traffic_secret = self.derive_secret(
+        self.server_application_traffic_secret = self.derive_secret(
             self.master_secret, "s ap traffic", self.client_handshake_context
         )
         self.client_application_write_key = self.hkdf_expand_label(
-            client_application_traffic_secret, "key", b"", self.traffic_key_length)
+            self.client_application_traffic_secret, "key", b"", self.traffic_key_length)
         self.client_application_write_iv = self.hkdf_expand_label(
-            client_application_traffic_secret, "iv", b"", self.traffic_iv_length)
+            self.client_application_traffic_secret, "iv", b"", self.traffic_iv_length)
         self.server_application_write_key = self.hkdf_expand_label(
-            server_application_traffic_secret, "key", b"", self.traffic_key_length
+            self.server_application_traffic_secret, "key", b"", self.traffic_key_length
         )
         self.server_application_write_iv = self.hkdf_expand_label(
-            server_application_traffic_secret, "iv", b"", self.traffic_iv_length
+            self.server_application_traffic_secret, "iv", b"", self.traffic_iv_length
         )
 
     def gen_0_bytes(self) -> bytearray:
