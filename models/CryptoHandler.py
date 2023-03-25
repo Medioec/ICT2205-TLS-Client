@@ -155,10 +155,9 @@ class CryptoHandler:
                     iteratorBack = iteratorBack + certCalInt
                     print("Data of sector")
                     print (certItSelf[iteratorFront:iteratorBack].hex()) # this print data itself
-                    # Your X.509 certificate in hex format (as a string)
-                    hex_cert = certItSelf[iteratorFront:iteratorBack].hex()
-                    # Convert the hex string to binary (DER) format
-                    der_cert = bytes.fromhex(hex_cert)
+
+                    # binary (DER) format
+                    der_cert = certItSelf[iteratorFront:iteratorBack]
                     # Parse the binary (DER) certificate
                     Server_hs_cert = x509.load_der_x509_certificate(der_cert, default_backend())
 
