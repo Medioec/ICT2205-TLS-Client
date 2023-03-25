@@ -47,11 +47,13 @@ class CryptoHandler:
 
     def __init__(self, curve: str):
         self.ecdhparam = ECDH(curve)
-        self.server_sequence_number = 0
-        self.client_sequence_number = 0
+        self.init_sequence_number()
 
     def xor(self, b1: bytes, b2: bytes):
         return bytes(a ^ b for a, b in zip(b1, b2))
+    
+    def init_sequence_number(self):
+        self.server_sequence_number = self.client_sequence_number = 0
 
     def get_next_server_nonce(self, iv: bytes) -> bytes:
         padded_seq = self.server_sequence_number.to_bytes(
@@ -73,9 +75,8 @@ class CryptoHandler:
         enc_length = len(tlsinnerbytes) + self.auth_tag_length
         additional_data = tls.ContentType.application_data.to_bytes(
             1, "big") + b"\x03\x03" + enc_length.to_bytes(2, "big")
-        cipher = AESGCM(self.client_application_write_key)
         nonce = self.get_next_client_nonce(self.client_application_write_iv)
-        enc_bytes = cipher.encrypt(nonce, tlsinnerbytes, additional_data)
+        enc_bytes = self.encrypt_bytes(tlsinnerbytes, additional_data, self.client_application_write_key, nonce)
         tlsct = tls.TLSCiphertext(
             tls.ContentType.application_data, tls.TLS12_PROTOCOL_VERSION, enc_length, enc_bytes)
         return tlsct
@@ -85,8 +86,7 @@ class CryptoHandler:
         nonce = self.get_next_server_nonce(self.server_application_write_iv)
         additional_data = tlsct.type.to_bytes(
             1, "big") + tlsct.legacy_record_version.to_bytes(2, "big") + tlsct.length.to_bytes(2, "big")
-        aesgcm = AESGCM(self.server_application_write_key)
-        decrypted = aesgcm.decrypt(nonce, enc_bytes, additional_data)
+        decrypted = self.decrypt_bytes(enc_bytes, additional_data, self.server_application_write_key, nonce)
         return decrypted
 
     def decrypt_application_bytes(self, raw_bytes: bytes) -> str:
@@ -110,11 +110,9 @@ class CryptoHandler:
         nonce = self.get_next_server_nonce(self.server_handshake_write_iv)
         additional_data = tlsct.type.to_bytes(
             1, "big") + tlsct.legacy_record_version.to_bytes(2, "big") + tlsct.length.to_bytes(2, "big")
-        aesgcm = AESGCM(self.server_handshake_write_key)
-        decrypted = aesgcm.decrypt(nonce, encbytes, additional_data)
+        decrypted = self.decrypt_bytes(encbytes, additional_data, self.server_handshake_write_key, nonce)
         tlsinner = tls.TLSInnerPlaintext.from_bytes(decrypted)
 
-        # TODO replace with correct code, need unwrap?
         hslist = tlsinner.parse_encrypted_handshake()
         self.client_handshake_context = self.handshake_bytes
         self.server_handshake_context = self.handshake_bytes
@@ -253,8 +251,7 @@ class CryptoHandler:
         enc_bytes = self.encrypt_bytes(tlsinnerpt.to_bytes(
         ), additional_data, self.client_handshake_write_key, nonce)
         tlsct = tls.TLSCiphertext(contenttype, version, ctlen, enc_bytes)
-        self.client_sequence_number = 0
-        self.server_sequence_number = 0
+        self.init_sequence_number()
         return tlsct
 
     def generate_change_cipher_spec(self) -> 'tls.TLSPlaintext':
@@ -262,14 +259,17 @@ class CryptoHandler:
 
     def encrypt_bytes(self, data: bytes, additional_data: bytes, key: bytes, nonce: bytes):
         return AESGCM(key).encrypt(nonce, data, additional_data)
+    
+    def decrypt_bytes(self, data: bytes, additional_data: bytes, key: bytes, nonce: bytes):
+        return AESGCM(key).decrypt(nonce, data, additional_data)
 
     def set_handshake_bytes(self, handshake: tls.Handshake, server_handshake: tls.Handshake):
         hsbytes = handshake.to_bytes() + server_handshake.to_bytes()
         self.handshake_bytes = hsbytes
 
-    def calculate_handshake_secrets(self, server_keyshare: bytes):
+    def calculate_handshake_secrets(self):
         self.ecdh_secret = self.ecdhparam.generate_shared_secret(
-            server_keyshare)
+            self.key_share_entry.key_exchange)
         zeros = self.gen_0_bytes()
         self.early_secret = self.hkdf_extract(zeros, zeros)
         self.handshake_secret = self.hkdf_extract(

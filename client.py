@@ -4,6 +4,7 @@ import secrets
 import socket
 import tls
 import tls_constants
+import klfgen
 
 from typing import Tuple
 from models.CryptoHandler import *
@@ -156,7 +157,7 @@ def main():
                 )
                 tls_list.append(tls_record_layer)
             parse_server_hello(handshake, tls_list, crypto)
-            crypto.calculate_handshake_secrets(crypto.key_share_entry.key_exchange)
+            crypto.calculate_handshake_secrets()
             encrypted_handshakes: list[tls.TLSCiphertext] = []
             for packet in tls_list:
                 for record in packet.records:
@@ -176,6 +177,7 @@ def main():
             s.sendall(tlsct.to_bytes())
             res = recvall(s, 999999999)
             text = crypto.decrypt_application_bytes(res)
+            klfgen.generate_klf(crypto)
         except socket.gaierror:
             # this means could not resolve the host
             print(f"Could not find host {args.hostname}")
@@ -194,7 +196,7 @@ def create_get_string():
         )
 
 def recvall(sock:socket.socket, n):
-    # Helper function to recv n bytes or return None if EOF is hit
+    # Helper function to recv n bytes until timeout
     sock.settimeout(1)
     data = bytearray()
     while len(data) < n:
@@ -225,7 +227,6 @@ def parse_server_hello(handshake: tls.Handshake, tls_list: list[tls.TLSRecordLay
             crypto.key_share_entry = key_share_entry
             break
     crypto.set_cipher_suite(server_handshake.server_hello.cipher_suite)
-    ################
     crypto.set_handshake_bytes(handshake, server_handshake)
 
 # return true if completed handshake found
