@@ -43,7 +43,7 @@ class TLSRecord:
 
 @dataclass
 class TLSRecordLayer:
-    records: List[TLSRecord] = None
+    records: list[TLSRecord] = None
 
     @classmethod
     def parse_records(cls, data: bytes) -> 'TLSRecordLayer':
