@@ -2,6 +2,7 @@ from models.CryptoHandler import *
 
 
 def generate_klf(crypto: CryptoHandler):
+    filename = "client.klf"
     clientrandom = crypto.clientrandom.hex()
     client_hs = crypto.client_handshake_traffic_secret.hex()
     server_hs = crypto.server_handshake_traffic_secret.hex()
@@ -13,6 +14,7 @@ def generate_klf(crypto: CryptoHandler):
         f"CLIENT_TRAFFIC_SECRET_0 {clientrandom} {client_app}\n"
         f"SERVER_TRAFFIC_SECRET_0 {clientrandom} {server_app}\n"
     )
-    fd = open("client.klf", "a")
+    fd = open(filename, "a")
     fd.write(txt)
     fd.close()
+    print("Saved secrets to file", filename, "(For demonstration purposes)")

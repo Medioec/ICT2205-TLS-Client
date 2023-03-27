@@ -7,20 +7,25 @@ class ECDH:
     public: bytes
     server_public: bytes
     shared_secret: bytes
+    key_length: int
 
     def __init__(self, type: str):
         if type == "x25519":
-            self.private = secrets.token_bytes(32)
+            self.key_length = 32
+            self.private = secrets.token_bytes(self.key_length)
             self.public = x25519.scalar_base_mult(self.private)
         else:
             raise Exception("Unsupported operation, please fix the code")
 
     def generate_private(self):
-        self.private = secrets.token_bytes(32)
+        self.private = secrets.token_bytes(self.key_length)
 
     def generate_shared_secret(self, server_public: bytes) -> bytes:
         self.server_public = bytes(server_public)
-        self.shared_secret = x25519.scalar_mult(self.private, self.server_public)
+        self.shared_secret = bytes(x25519.scalar_mult(self.private, self.server_public))
+        # reject a 0 result as per rfc 7748 section 6.1
+        if self.shared_secret == bytes(self.key_length):
+            raise ValueError("Bad keyshare, ECDH shared key is 0")
         return self.shared_secret
 
     def sanity_check(self):

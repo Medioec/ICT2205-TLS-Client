@@ -254,7 +254,7 @@ def verify_response(
         raise Exception("Hello retry not implemented")
     return recordlayer.is_handshake_complete(), clienthello, recordlayer
 
-
+# check hello as per rfc8446 section 4.1.3
 def check_server_hello(
     serverhello: tls.ServerHello, clienthello: tls.ClientHello
 ) -> Tuple[bool, tls.ClientHello, tls.ServerHello]:

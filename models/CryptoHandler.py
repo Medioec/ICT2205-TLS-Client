@@ -43,7 +43,7 @@ class CryptoHandler:
     server_handshake_write_key: bytes
     server_handshake_write_iv: bytes
 
-    # 64 bit sequence number
+    # 64 bit sequence number as per rfc8446 section 5.3
     server_sequence_number: int
     client_sequence_number: int
 
@@ -57,6 +57,7 @@ class CryptoHandler:
     def init_sequence_number(self):
         self.server_sequence_number = self.client_sequence_number = 0
 
+    # nonce generation as per rfc8446 section 5.3
     def get_next_server_nonce(self, iv: bytes) -> bytes:
         padded_seq = self.server_sequence_number.to_bytes(
             self.traffic_iv_length, "big")
@@ -64,6 +65,7 @@ class CryptoHandler:
         self.server_sequence_number += 1
         return nonce
 
+    # nonce generation as per rfc8446 section 5.3
     def get_next_client_nonce(self, iv: bytes) -> bytes:
         padded_seq = self.client_sequence_number.to_bytes(
             self.traffic_iv_length, "big")
@@ -71,6 +73,7 @@ class CryptoHandler:
         self.client_sequence_number += 1
         return nonce
 
+    # encryption as per rfc8446 section 5.2 and 5.3
     def encrypt_message(self, message: str) -> 'tls.TLSCiphertext':
         tlsinnerbytes = tls.TLSInnerPlaintext(
             message.encode(), tls.ContentType.application_data, b"").to_bytes()
@@ -84,6 +87,7 @@ class CryptoHandler:
             tls.ContentType.application_data, tls.TLS12_PROTOCOL_VERSION, enc_length, enc_bytes)
         return tlsct
 
+    # decrytion as per rfc8446 section 5.2 and 5.3
     def decrypt_application_ct(self, tlsct: tls.TLSCiphertext) -> bytes:
         enc_bytes = tlsct.encrypted_record
         nonce = self.get_next_server_nonce(self.server_application_write_iv)
@@ -109,12 +113,11 @@ class CryptoHandler:
         print(f"Total Application TLS records received: {len(decrypted)}")
         return text
 
-
+    # decrypt, parse and verify encrypted handshake
     def decrypt_handshake(self, tlsct: tls.TLSCiphertext):
         global authority_key_identifier, rootCAMatchedPkCert
         server_certs_from_hs = []
         encbytes = tlsct.encrypted_record
-        # nonce as per section 5.3, rfc 8446
         nonce = self.get_next_server_nonce(self.server_handshake_write_iv)
         additional_data = tlsct.type.to_bytes(
             1, "big") + tlsct.legacy_record_version.to_bytes(2, "big") + tlsct.length.to_bytes(2, "big")
@@ -351,6 +354,7 @@ class CryptoHandler:
         if finished_hs is not None and verify_data != finished_hs.data:
             raise Exception("Calculated MAC is different from server MAC")
 
+    # generate as per rfc8446 section 4.4.4
     def generate_client_finished_handshake(self) -> 'tls.TLSCiphertext':
         finished_key = self.hkdf_expand_label(
             self.client_handshake_traffic_secret, "finished", b"", self.hash_length)
@@ -387,6 +391,7 @@ class CryptoHandler:
         hsbytes = handshake.to_bytes() + server_handshake.to_bytes()
         self.handshake_bytes = hsbytes
 
+    # calculation as per rfc8446 section 7.1
     def calculate_handshake_secrets(self):
         self.ecdh_secret = self.ecdhparam.generate_shared_secret(
             self.key_share_entry.key_exchange)
@@ -414,6 +419,7 @@ class CryptoHandler:
         self.server_handshake_write_iv = self.hkdf_expand_label(
             self.server_handshake_traffic_secret, "iv", b"", self.traffic_iv_length)
 
+    # calculation as per rfc8446 section 7.1
     def calculate_application_secrets(self):
         self.client_application_traffic_secret = self.derive_secret(
             self.master_secret, "c ap traffic", self.client_handshake_context
@@ -467,14 +473,17 @@ class CryptoHandler:
         else:
             raise Exception("Error setting cipher suite")
 
+    # calculation as per rfc8446 section 7.1
     def derive_secret(self, secret: bytes, label: str, messages: bytes) -> bytes:
         transcript_hash = self.transcript_hash(messages)
         return self.hkdf_expand_label(secret, label, transcript_hash, self.hash_length)
 
+    # calculation as per rfc8446 section 7.1
     def transcript_hash(self, context: bytes) -> bytes:
         return self.hashlib_algo(context).digest()
 
     # length: length in bytes
+    # calculation as per rfc8446 section 7.1
     def hkdf_expand_label(
         self, secret: bytes, label: str, context: bytes, length: int
     ) -> bytes:
@@ -489,6 +498,7 @@ class CryptoHandler:
             secret, hkdf_label, length, hash=self.hashlib_algo)
         return res
 
+    # calculation as per rfc8446 section 7.1
     def hkdf_extract(self, salt: bytes, key: bytes) -> bytes:
         return hkdf.hkdf_extract(salt, key, hash=self.hashlib_algo)
 
