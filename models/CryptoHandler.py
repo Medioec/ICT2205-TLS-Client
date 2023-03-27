@@ -1,3 +1,5 @@
+import cryptography
+
 import tls
 import hkdf
 import hashlib
@@ -228,78 +230,97 @@ class CryptoHandler:
                 # You can do this by checking the signature on each certificate in the chain.
                 # This process involves checking if the issuer of each certificate in the chain is the subject of the next certificate in the chain.
                 # If any of these steps fail, the certificate chain should be considered invalid and the TLS handshake should be terminated.
-                for root_cert_pem in root_ca_certs:
-                    root_ca_cert = x509.load_pem_x509_certificate(root_cert_pem, default_backend())
 
-                    # Check if the certificate chain is valid and find the server's certificate, based on testcase it only has 3??
-                    if server_certs_from_hs:
-                        # Get the issuer of the 1st certificate in the chain (the root CA)
-                        root_issuer = server_certs_from_hs[0].issuer
+                # Check if the certificate chain is valid and find the server's certificate, based on testcase it only has 3??
+                if server_certs_from_hs:
+                    # Get the issuer of the 1st certificate in the chain (the root CA)
+                    root_issuer = server_certs_from_hs[0].issuer
 
-                        if len(server_certs_from_hs) > 1 and server_certs_from_hs[1].subject == root_issuer:
-                            # The first certificate in the chain is the server's certificate
-                            server_cert_index = 0
+                    if len(server_certs_from_hs) > 1 and server_certs_from_hs[1].subject == root_issuer:
+                        # The first certificate in the chain is the server's certificate
+                        server_cert_index = 0
+                    else:
+                        # Check if the subject of the second last certificate in the chain matches the issuer of the last certificate
+                        if len(server_certs_from_hs) > 1 and server_certs_from_hs[-2].subject == server_certs_from_hs[-1].issuer:
+                            # The last certificate in the chain is the server's certificate
+                            server_cert_index = -1
                         else:
-                            # Check if the subject of the second last certificate in the chain matches the issuer of the last certificate
-                            if len(server_certs_from_hs) > 1 and server_certs_from_hs[-2].subject == server_certs_from_hs[-1].issuer:
-                                # The last certificate in the chain is the server's certificate
-                                server_cert_index = -1
-                            else:
-                                # The certificate chain is invalid
-                                print("Certificate chain is invalid: issuer and subject do not match")
-                                return None
+                            # The certificate chain is invalid
+                            print("Certificate chain is invalid: issuer and subject do not match")
+                            return None
 
-                        # Verify the certificate chain and signature of each certificate
-                        # Check if the subject of the 2nd certificate in the chain matches the issuer of the 1st certificate
-                        ccv_found_match = False
-                        # current cert is the server's, typically index 0
-                        identified_server_cert = server_certs_from_hs[server_cert_index]
-                        for server_cert in server_certs_from_hs[server_cert_index + 1:]:
-                            if identified_server_cert.issuer != server_cert.subject:
-                                print("Certificate chain is invalid: issuer and subject do not match")
-                                break
-
-                            # after we pass 1st issuer == 2nd subject in the cert
-                            # verify() method of the PublicKey object takes the signature of the certificate, the bytes of the certificate's to-be-signed portion,
-                            # the padding algorithm used for the signature, and the signature hash algorithm as arguments.
-                            # from debug results,  the signature_algorithm_oid is <ObjectIdentifier(oid=1.2.840.113549.1.1.11, name=sha256WithRSAEncryption)>, the padding scheme used is PKCS1v15 is correct
-                            if server_cert.signature_algorithm_oid in (
-                                    x509.SignatureAlgorithmOID.RSA_WITH_SHA256,
-                                    x509.SignatureAlgorithmOID.RSA_WITH_SHA384,
-                                    x509.SignatureAlgorithmOID.RSA_WITH_SHA512,
-                            ):
-                                padding_scheme = padding.PKCS1v15()
-                            else:
-                                raise ValueError(f"Unsupported signature algorithm")
-
-                            # verify() method of the PublicKey object associated with the server_cert to verify the signature of the current_cert. NOT WORKING PROPERLY!
-                            if not server_cert.public_key().verify(
-                                    identified_server_cert.signature,
-                                    identified_server_cert.tbs_certificate_bytes,
-                                    padding_scheme,
-                                    identified_server_cert.signature_hash_algorithm,
-                            ):
-                                print("Certificate chain is invalid: signature is not valid")
-                                break
-
-                            #current_cert = server_cert
-
-                            # Verify against trusted root CA, has issues on signature verification
-                            if server_cert.issuer == root_ca_cert.subject:
-                                if server_cert.signature == root_ca_cert.public_key().verify(server_cert.tbs_certificate_bytes, server_cert.signature):
-                                    print("Server's certificate is valid and signed by a trusted root CA")
-                                    ccv_found_match = True
-                                    break
-
-                        if ccv_found_match:
+                    # Verify the certificate chain and signature of each certificate
+                    # Check if the subject of the 2nd certificate in the chain matches the issuer of the 1st certificate
+                    ccv_found_match = False
+                    # current cert is the server's, typically index 0
+                    identified_server_cert = server_certs_from_hs[server_cert_index]
+                    for server_cert in server_certs_from_hs[server_cert_index + 1:]:
+                        if identified_server_cert.issuer != server_cert.subject:
+                            print("Certificate chain is invalid: issuer and subject do not match\n")
                             break
+                        else:
+                            print("Certificate chain is valid: issuer and subject match\n")
 
+                        # after we pass 1st issuer == 2nd subject in the cert
+                        # before that we check if the signature algorithm is supported
+                        # from debug results,  the signature_algorithm_oid is <ObjectIdentifier(oid=1.2.840.113549.1.1.11, name=sha256WithRSAEncryption)>, the padding scheme used is PKCS1v15 is correct
+                        if server_cert.signature_algorithm_oid in (
+                                x509.SignatureAlgorithmOID.RSA_WITH_SHA256,
+                                x509.SignatureAlgorithmOID.RSA_WITH_SHA384,
+                                x509.SignatureAlgorithmOID.RSA_WITH_SHA512,
+                        ):
+                            padding_scheme = padding.PKCS1v15()
+                        else:
+                            raise ValueError(f"Unsupported signature algorithm")
+
+                        print(f"Identified server cert subject: {identified_server_cert.subject}")
+                        print(f"Identified server cert issuer: {identified_server_cert.issuer}")
+                        print(f"Server cert subject: {server_cert.subject}")
+                        print(f"Server cert issuer: {server_cert.issuer}")
+                        print(f"Padding scheme: {padding_scheme}")
+                        print(f"Signature hash algorithm: {identified_server_cert.signature_hash_algorithm}")
+
+                        # verify() method of the PublicKey object takes the signature of the certificate, the bytes of the certificate's to-be-signed portion,
+                        # the padding algorithm used for the signature, and the signature hash algorithm as arguments.
+                        # verify() method of the PublicKey object associated with the server_cert to verify the signature of the current_cert. NOT WORKING PROPERLY!
+                        #using the public key of the 2nd cert in the chain to verify the identified server cert's signature
+                        # the current order
+                        # Identified server certificate
+                        # Intermediate certificate
+                        # Root certificate
+
+                        # the current server cert is CA1, we should use the pk from our matched rootCA in RootsREM
+                        # use that rootCA pk and validate CA1 to validate  CA1 cert signature
+                        # if signature is valid. verify() returns none, prog continues. This means CA1 cert signature is validated and valid
+                        #Next, i should validate Server cert signature using CA1 pk.
+                        try:
+                            rootCAMatchedPkCert.public_key().verify(
+                                server_cert.signature,
+                                server_cert.tbs_certificate_bytes,
+                                padding_scheme,
+                                server_cert.signature_hash_algorithm,
+                            )
+                        except cryptography.exceptions.InvalidSignature:
+                            print("\nCertificate chain is invalid: signature is not valid\n")
+                            break
+                        print("\nCertificate chain is valid: intermediate cert signature is valid\n")
+                        # validate server cert signature using CA1 pk
+                        try:
+                            server_cert.public_key().verify(
+                                identified_server_cert.signature,
+                                identified_server_cert.tbs_certificate_bytes,
+                                padding_scheme,
+                                identified_server_cert.signature_hash_algorithm,
+                            )
+                        except cryptography.exceptions.InvalidSignature:
+                            print("\nCertificate chain is invalid: signature is not valid\n")
+                            break
+                        print("\nCertificate chain is valid: server signature is valid\n")
+                        ccv_found_match = True
+                    if ccv_found_match:
+                        break
                     if not ccv_found_match:
                         print("Server's certificate is not signed by a trusted root CA")
-
-
-
-
                 print("\n\nCert is confirm up there somewhere \n\n")
 
 
@@ -307,7 +328,7 @@ class CryptoHandler:
                 # we do certificate chain verification here
                 print("Cert verify found")
                 certverify = hs.to_bytes()
-                print(hs)
+                #print(hs)
 
 
 
