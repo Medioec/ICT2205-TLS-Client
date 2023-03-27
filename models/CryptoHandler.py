@@ -1,4 +1,5 @@
 import cryptography
+import requests as requests
 
 import tls
 import hkdf
@@ -6,7 +7,6 @@ import hashlib
 import hmac
 from cryptography.exceptions import UnsupportedAlgorithm, InvalidSignature
 from cryptography import x509
-from cryptography.x509.extensions import AuthorityKeyIdentifier
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 import re
@@ -14,6 +14,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from models.ECDH import *
 from cryptography.hazmat.primitives.asymmetric import rsa, dsa, ec
 from cryptography.hazmat.primitives.asymmetric import padding
+from datetime import datetime
 
 class CryptoHandler:
     key_share_entry: tls.KeyShareEntry = None
@@ -116,7 +117,7 @@ class CryptoHandler:
     # decrypt, parse and verify encrypted handshake
     def decrypt_handshake(self, tlsct: tls.TLSCiphertext):
         global authority_key_identifier, rootCAMatchedPkCert
-        server_certs_from_hs = []
+
         encbytes = tlsct.encrypted_record
         nonce = self.get_next_server_nonce(self.server_handshake_write_iv)
         additional_data = tlsct.type.to_bytes(
@@ -135,206 +136,13 @@ class CryptoHandler:
             if hs.msg_type == 11:
                 print("Cert found")
                 cert = hs.to_bytes()
-
-                print("\n\nCert is confirm in here somewhere \n\n")
-
-                certItSelf = hs.data
-
-                if int.from_bytes(certItSelf[0:1], "big") == 0:
-                    print("This shit is X509")
-                elif int.from_bytes(certItSelf[0:1], "big") == 2:
-                    print("This shit is RawPublicKey")
-
-                # calculate size of cert
-                TotalSize = int.from_bytes(certItSelf[1:4], "big")
-
-                print("Total Size of cert is: ")
-                print(TotalSize)
-                iteratorFront = 4
-                iteratorBack = 7
-                root_ca_certs  = []
-                while iteratorBack <= TotalSize + 4:
-                    # this part handles data
-                    print("Size of sector")
-                    # this print size of data
-                    print(certItSelf[iteratorFront:iteratorBack].hex())
-                    certCalInt = int.from_bytes(
-                        certItSelf[iteratorFront:iteratorBack], "big")
-                    print("Size of sector in int")
-                    print(certCalInt)  # this print the size of data in int
-                    iteratorFront = iteratorBack
-                    iteratorBack = iteratorBack + certCalInt
-                    print("Data of sector")
-                    print(certItSelf[iteratorFront:iteratorBack].hex()) # this print data itself
-                    #
-
-                    # binary (DER) format
-                    der_cert = certItSelf[iteratorFront:iteratorBack]
-                    # Load the server handshake response certificate
-                    Server_hs_cert = x509.load_der_x509_certificate(der_cert, default_backend())
-                    #append the server hs certs into a list
-                    server_certs_from_hs.append(x509.load_der_x509_certificate(der_cert, default_backend()))
-
-                    found_match = False
-                    # Load the list of included root CAs
-                    with open("IncludedRootsPEM.txt", "rb") as f:
-                        root_ca_pem = f.read()
-                        regex_pattern = b"-----BEGIN CERTIFICATE-----\r?\n(.*?)\r?\n-----END CERTIFICATE-----"
-                        matches = re.findall(
-                            regex_pattern, root_ca_pem, re.DOTALL)
-
-                        # Decoding the certificates and creating a list of certificates in PEM format
-                        root_ca_certs  = [b"-----BEGIN CERTIFICATE-----\n" + match + b"\n-----END CERTIFICATE-----" for match in matches]
-
-                    for cert_pem in root_ca_certs :
-                        root_ca_cert = x509.load_pem_x509_certificate(cert_pem, default_backend())
-
-                        # Compare the certificates' public keys
-                        if Server_hs_cert.public_key().public_bytes(
-                                encoding=serialization.Encoding.PEM,
-                                format=serialization.PublicFormat.SubjectPublicKeyInfo
-                        ) == root_ca_cert.public_key().public_bytes(
-                            encoding=serialization.Encoding.PEM,
-                            format=serialization.PublicFormat.SubjectPublicKeyInfo
-                        ):
-                            print(f"The server's certificate is signed by a trusted root CA {root_ca_cert.subject.rfc4514_string()}.")
-                            found_match = True
-                            rootCAMatchedPkCert = Server_hs_cert
-                            break
-
-                    if not found_match:
-                        print("The server's certificate is not signed by a trusted root CA.")
-
-
-                    # this part handles ext
-                    iteratorFront = iteratorBack
-                    iteratorBack = iteratorBack + 2
-                    print("Size of extensions")
-                    # this print size of ext
-                    print(certItSelf[iteratorFront:iteratorBack].hex())
-                    certCalInt = int.from_bytes(
-                        certItSelf[iteratorFront:iteratorBack], "big")
-                    print("Size of extensions in int")
-                    print(certCalInt)  # this print the size of ext in int
-                    iteratorFront = iteratorBack
-                    iteratorBack = iteratorBack + certCalInt
-                    print("Data of extensions")
-                    # this print ext itself
-                    print(certItSelf[iteratorFront:iteratorBack].hex())
-
-                    # set up for next loop
-                    iteratorFront = iteratorBack
-                    iteratorBack = iteratorBack + 3
-
-                print("\n\nCert is confirm up there somewhere \n\n")
-
-                # Done
-                # Verify the certificate chain: Ensure that the server's certificate is signed by a trusted intermediate certificate, which is in turn signed by a trusted root CA.
-                # You can do this by checking the signature on each certificate in the chain.
-                # This process involves checking if the issuer of each certificate in the chain is the subject of the next certificate in the chain.
-                # If any of these steps fail, the certificate chain should be considered invalid and the TLS handshake should be terminated.
-
-                # Check if the certificate chain is valid and find the server's certificate, based on testcase it only has 3??
-                if server_certs_from_hs:
-                    # Get the issuer of the 1st certificate in the chain (the root CA)
-                    root_issuer = server_certs_from_hs[0].issuer
-
-                    if len(server_certs_from_hs) > 1 and server_certs_from_hs[1].subject == root_issuer:
-                        # The first certificate in the chain is the server's certificate
-                        server_cert_index = 0
-                    else:
-                        # Check if the subject of the second last certificate in the chain matches the issuer of the last certificate
-                        if len(server_certs_from_hs) > 1 and server_certs_from_hs[-2].subject == server_certs_from_hs[-1].issuer:
-                            # The last certificate in the chain is the server's certificate
-                            server_cert_index = -1
-                        else:
-                            # The certificate chain is invalid
-                            print("Certificate chain is invalid: issuer and subject do not match")
-                            return None
-
-                    # Verify the certificate chain and signature of each certificate
-                    # Check if the subject of the 2nd certificate in the chain matches the issuer of the 1st certificate
-                    ccv_found_match = False
-                    # current cert is the server's, typically index 0
-                    identified_server_cert = server_certs_from_hs[server_cert_index]
-                    for server_cert in server_certs_from_hs[server_cert_index + 1:]:
-                        if identified_server_cert.issuer != server_cert.subject:
-                            print("Certificate chain is invalid: issuer and subject do not match\n")
-                            break
-                        else:
-                            print("Certificate chain is valid: issuer and subject match\n")
-
-                        # after we pass 1st issuer == 2nd subject in the cert
-                        # before that we check if the signature algorithm is supported
-                        # from debug results,  the signature_algorithm_oid is <ObjectIdentifier(oid=1.2.840.113549.1.1.11, name=sha256WithRSAEncryption)>, the padding scheme used is PKCS1v15 is correct
-                        if server_cert.signature_algorithm_oid in (
-                                x509.SignatureAlgorithmOID.RSA_WITH_SHA256,
-                                x509.SignatureAlgorithmOID.RSA_WITH_SHA384,
-                                x509.SignatureAlgorithmOID.RSA_WITH_SHA512,
-                        ):
-                            padding_scheme = padding.PKCS1v15()
-                        else:
-                            raise ValueError(f"Unsupported signature algorithm")
-
-                        print(f"Identified server cert subject: {identified_server_cert.subject}")
-                        print(f"Identified server cert issuer: {identified_server_cert.issuer}")
-                        print(f"Server cert subject: {server_cert.subject}")
-                        print(f"Server cert issuer: {server_cert.issuer}")
-                        print(f"Padding scheme: {padding_scheme}")
-                        print(f"Signature hash algorithm: {identified_server_cert.signature_hash_algorithm}")
-
-                        # verify() method of the PublicKey object takes the signature of the certificate, the bytes of the certificate's to-be-signed portion,
-                        # the padding algorithm used for the signature, and the signature hash algorithm as arguments.
-                        # verify() method of the PublicKey object associated with the server_cert to verify the signature of the current_cert. NOT WORKING PROPERLY!
-                        #using the public key of the 2nd cert in the chain to verify the identified server cert's signature
-                        # the current order
-                        # Identified server certificate
-                        # Intermediate certificate
-                        # Root certificate
-
-                        # the current server cert is CA1, we should use the pk from our matched rootCA in RootsREM
-                        # use that rootCA pk and validate CA1 to validate  CA1 cert signature
-                        # if signature is valid. verify() returns none, prog continues. This means CA1 cert signature is validated and valid
-                        #Next, i should validate Server cert signature using CA1 pk.
-                        try:
-                            rootCAMatchedPkCert.public_key().verify(
-                                server_cert.signature,
-                                server_cert.tbs_certificate_bytes,
-                                padding_scheme,
-                                server_cert.signature_hash_algorithm,
-                            )
-                        except cryptography.exceptions.InvalidSignature:
-                            print("\nCertificate chain is invalid: signature is not valid\n")
-                            break
-                        print("\nCertificate chain is valid: intermediate cert signature is valid\n")
-                        # validate server cert signature using CA1 pk
-                        try:
-                            server_cert.public_key().verify(
-                                identified_server_cert.signature,
-                                identified_server_cert.tbs_certificate_bytes,
-                                padding_scheme,
-                                identified_server_cert.signature_hash_algorithm,
-                            )
-                        except cryptography.exceptions.InvalidSignature:
-                            print("\nCertificate chain is invalid: signature is not valid\n")
-                            break
-                        print("\nCertificate chain is valid: server signature is valid\n")
-                        ccv_found_match = True
-                    if ccv_found_match:
-                        break
-                    if not ccv_found_match:
-                        print("Server's certificate is not signed by a trusted root CA")
-                print("\n\nCert is confirm up there somewhere \n\n")
-
+                certificate_verify(hs.data)
 
             elif hs.msg_type == 15:
                 # we do certificate chain verification here
                 print("Cert verify found")
                 certverify = hs.to_bytes()
                 #print(hs)
-
-
-
 
             elif hs.msg_type == 8:
                 print("Encrypted extensions found")
@@ -517,3 +325,174 @@ class CryptoHandler:
             f"{'Server app key: ':20} {self.server_application_write_key.hex()}\n"
             f"{'Server app iv: ':20} {self.server_application_write_iv.hex()}\n"
         )
+
+
+
+def certificate_verify(certItSelf):
+        server_certs_from_hs = []
+
+        # calculate size of cert
+        TotalSize = int.from_bytes(certItSelf[1:4], "big")
+
+        iteratorFront = 4
+        iteratorBack = 7
+
+        found_match = False
+
+        root_ca_certs = []
+        while iteratorBack <= TotalSize + 4:
+            certCalInt = int.from_bytes(
+                certItSelf[iteratorFront:iteratorBack], "big")
+
+            iteratorFront = iteratorBack
+            iteratorBack = iteratorBack + certCalInt
+
+            # binary (DER) format
+            der_cert = certItSelf[iteratorFront:iteratorBack]
+            # Load the server handshake response certificate
+            Server_hs_cert = x509.load_der_x509_certificate(der_cert, default_backend())
+            # append the server hs certs into a list
+            server_certs_from_hs.append(x509.load_der_x509_certificate(der_cert, default_backend()))
+
+            # Load the list of included root CAs
+            with open("IncludedRootsPEM.txt", "rb") as f:
+                root_ca_pem = f.read()
+                regex_pattern = b"-----BEGIN CERTIFICATE-----\r?\n(.*?)\r?\n-----END CERTIFICATE-----"
+                matches = re.findall(
+                    regex_pattern, root_ca_pem, re.DOTALL)
+
+                # Decoding the certificates and creating a list of certificates in PEM format
+                root_ca_certs = [b"-----BEGIN CERTIFICATE-----\n" + match + b"\n-----END CERTIFICATE-----" for match in matches]
+
+            for cert_pem in root_ca_certs:
+                root_ca_cert = x509.load_pem_x509_certificate(cert_pem, default_backend())
+
+                # Compare the certificates' public keys
+                if Server_hs_cert.public_key().public_bytes(
+                        encoding=serialization.Encoding.PEM,
+                        format=serialization.PublicFormat.SubjectPublicKeyInfo
+                ) == root_ca_cert.public_key().public_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PublicFormat.SubjectPublicKeyInfo
+                ):
+                    print(f"This certificate is signed by a trusted root CA {root_ca_cert.subject.rfc4514_string()}.")
+                    found_match = True
+                    rootCAMatchedPkCert = Server_hs_cert
+                    break
+
+            # this part handles ext
+            iteratorFront = iteratorBack
+            iteratorBack = iteratorBack + 2
+
+            certCalInt = int.from_bytes(
+                certItSelf[iteratorFront:iteratorBack], "big")
+
+            iteratorFront = iteratorBack
+            iteratorBack = iteratorBack + certCalInt
+
+            # set up for next loop
+            iteratorFront = iteratorBack
+            iteratorBack = iteratorBack + 3
+
+        if not found_match:
+            return (print("The certificate trusted root CA is not found in IncludedRootsPEM\n"))
+
+        # Verify the certificate chain: Ensure that the server's certificate is signed by a trusted intermediate certificate, which is in turn signed by a trusted root CA.
+        # You can do this by checking the signature on each certificate in the chain.
+        # This process involves checking if the issuer of each certificate in the chain is the subject of the next certificate in the chain.
+        # If any of these steps fail, the certificate chain should be considered invalid and the TLS handshake should be terminated.
+        ccv_found_match = False
+        now = datetime.utcnow()
+        # This part check if the certificate chain is valid and find the server's certificate
+        if server_certs_from_hs:
+            # Get the issuer of the 1st certificate in the chain (the root CA)
+            root_issuer = server_certs_from_hs[0].issuer
+
+            if len(server_certs_from_hs) > 1 and server_certs_from_hs[1].subject == root_issuer:
+                # The first certificate in the chain is the server's certificate
+                server_cert_index = 0
+            else:
+                # Check if the subject of the second last certificate in the chain matches the issuer of the last certificate
+                if len(server_certs_from_hs) > 1 and server_certs_from_hs[-2].subject == server_certs_from_hs[-1].issuer:
+                    # The last certificate in the chain is the server's certificate
+                    server_certs_from_hs = server_certs_from_hs.reverse()
+                else:
+                    # The certificate chain is invalid
+                    print("Certificate chain is invalid: issuer and subject do not match")
+                    return None
+            #  check for certificate expiration &  whether certificate is revoked
+            for scfh in server_certs_from_hs:
+                crl_distribution_points = scfh.extensions.get_extension_for_class(x509.CRLDistributionPoints).value
+                for crl_dp in crl_distribution_points:
+                    crl_url = crl_dp.full_name[0].value
+                    crl_pem_data = requests.get(crl_url)
+
+                    # crl_der_data is the fetched DER data from the CRL URL
+                    crl = x509.load_der_x509_crl(crl_pem_data.content, default_backend())
+
+                    if scfh.not_valid_before <= now <= scfh.not_valid_after:
+
+                        print(f"Certificate {scfh.subject.rfc4514_string()} at {now} is still valid.")
+                    else:
+                        print(f"Certificate {scfh.subject.rfc4514_string()} is expired.")
+                        ccv_found_match = False
+                        break
+                    # Check if the certificate is revoked
+                    revoked_cert = crl.get_revoked_certificate_by_serial_number(scfh.serial_number)
+                    if revoked_cert is not None:
+                        print(f"Certificate {scfh.subject.rfc4514_string()} is revoked.")
+                        ccv_found_match = False
+                    else:
+                        print(f"Certificate {scfh.subject.rfc4514_string()} is not revoked.")
+
+            # Verify the certificate chain and signature of each certificate
+            # Check if the subject of the following certificate in the chain matches the issuer of the prior certificate
+            len_of_cert = len(server_certs_from_hs)
+            for x in range(0, len_of_cert -1):
+                if server_certs_from_hs[x].issuer != server_certs_from_hs[x+1].subject:
+                    print("Certificate chain is invalid: issuer and subject do not match\n")
+                    ccv_found_match = False
+                    break
+                else:
+                    print("Certificate chain is valid: issuer and subject match\n")
+
+                # before that we check if the signature algorithm is supported the padding scheme used is PKCS1v15 is correct, for poc not exhaustive
+                if server_certs_from_hs[x+1].signature_algorithm_oid in (
+                        x509.SignatureAlgorithmOID.RSA_WITH_SHA256,
+                        x509.SignatureAlgorithmOID.RSA_WITH_SHA384,
+                        x509.SignatureAlgorithmOID.RSA_WITH_SHA512,
+                ):
+                    padding_scheme = padding.PKCS1v15()
+                else:
+                    raise ValueError(f"Unsupported signature algorithm")
+
+                # verify() method of the PublicKey object takes the signature of the certificate, the bytes of the certificate's to-be-signed portion,
+                # the padding algorithm used for the signature, and the signature hash algorithm as arguments.
+
+                # the current order
+                # Identified server certificate
+                # Intermediate certificate(s)
+                # Root certificate
+
+                # the current server cert is CA1, we should use the pk from our matched rootCA in RootsREM
+                # use that rootCA pk and validate CA1 to validate  CA1 cert signature
+                # if signature is valid. verify() returns none, prog continues. This means CA1 cert signature is validated and valid
+                try:
+                    server_certs_from_hs[len_of_cert-x -1].public_key().verify(
+                        server_certs_from_hs[len_of_cert - x - 2].signature,
+                        server_certs_from_hs[len_of_cert - x - 2].tbs_certificate_bytes,
+                        padding_scheme,
+                        server_certs_from_hs[len_of_cert - x - 2].signature_hash_algorithm,
+                    )
+                except cryptography.exceptions.InvalidSignature:
+                    print("\nCertificate chain is invalid: signature is not valid\n")
+                    ccv_found_match = False
+                    break
+                print("\nCertificate chain is valid: cert signature is valid")
+                print("'"+server_certs_from_hs[len_of_cert-x -1].subject.rfc4514_string()+"'s\t" + " public key was used to verify signature of\t" +"'"+ server_certs_from_hs[len_of_cert-x -2].subject.rfc4514_string()+"'" )
+                # current chain cert validation is valid
+                ccv_found_match = True
+        if not ccv_found_match:
+            print("Server's certificate is not signed by a trusted root CA")
+        elif ccv_found_match:
+            print("Certificate chain verification complete, Server's certificate is signed by a trusted root CA\n")
