@@ -33,17 +33,8 @@ class ContentType(IntEnum):
 
 
 @dataclass
-class TLSRecord:
-    type: ContentType # 1 byte
-    legacy_record_version: int # 2 bytes
-    length: int # 2 bytes
-
-    def to_bytes(self) -> bytes:
-        raise NotImplementedError("This method should be called on child classes instead")
-
-@dataclass
 class TLSRecordLayer:
-    records: list[TLSRecord] = None
+    records: 'list[TLSRecord]' = None
 
     @classmethod
     def parse_records(cls, data: bytes) -> 'TLSRecordLayer':
@@ -83,6 +74,17 @@ class TLSRecordLayer:
             return True
         return False
 
+# TLS records as per rfc8446 sections 5.1 and 5.2
+@dataclass
+class TLSRecord:
+    type: ContentType # 1 byte
+    legacy_record_version: int # 2 bytes
+    length: int # 2 bytes
+
+    def to_bytes(self) -> bytes:
+        raise NotImplementedError("This method should be called on child classes instead")
+
+# TLS records as per rfc8446 sections 5.1 and 5.2
 @dataclass
 class TLSPlaintext(TLSRecord):
     fragment: bytes
@@ -102,22 +104,13 @@ class TLSPlaintext(TLSRecord):
         return cls(ContentType(type), legacy_record_version, length, fragment)
 
 
+# TLS records as per rfc8446 sections 5.1 and 5.2
 @dataclass
 class TLSInnerPlaintext:
     content: bytes
     type: ContentType
     zeros: bytes
     TLS_INNER_SIZE_LIMIT = 0x4001
-
-    def to_bytes(self) -> bytes:
-        return self.content + struct.pack("!B", self.type.value) + self.zeros
-
-    @classmethod
-    def from_bytes2(cls, data: bytes) -> 'TLSInnerPlaintext':
-        type = ContentType(data[-1])
-        zeros = data[-1:]
-        content = data[:-1]
-        return cls(content, type, zeros)
 
     def to_bytes(self) -> bytes:
         if not self.is_valid_length():
@@ -152,6 +145,7 @@ class TLSInnerPlaintext:
             start += 4 + length
         return hslist
 
+# TLS records as per rfc8446 sections 5.1 and 5.2
 @dataclass
 class TLSCiphertext(TLSRecord):
     encrypted_record: bytes
@@ -367,7 +361,7 @@ class ClientHello:
             + self.extensions
         )
 
-
+# Server hello as per rfc8446 section 4.1.3
 @dataclass
 class ServerHello:
     legacy_version: int

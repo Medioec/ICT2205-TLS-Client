@@ -138,6 +138,7 @@ class CryptoHandler:
                 cert = hs.to_bytes()
                 certificate_verify(hs.data)
 
+
             elif hs.msg_type == 15:
                 # we do certificate chain verification here
                 print("Cert verify found")
