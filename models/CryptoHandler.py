@@ -320,8 +320,6 @@ class CryptoHandler:
                             break
                         print("\nCertificate chain is valid: server signature is valid\n")
                         ccv_found_match = True
-                    if ccv_found_match:
-                        break
                     if not ccv_found_match:
                         print("Server's certificate is not signed by a trusted root CA")
                 print("\n\nCert is confirm up there somewhere \n\n")
