@@ -110,7 +110,7 @@ class CryptoHandler:
 
     def decrypt_handshake(self, tlsct: tls.TLSCiphertext):
         global authority_key_identifier, rootCAMatchedPkCert
-        server_certs = []
+        server_certs_from_hs = []
         encbytes = tlsct.encrypted_record
         # nonce as per section 5.3, rfc 8446
         nonce = self.get_next_server_nonce(self.server_handshake_write_iv)
@@ -168,7 +168,7 @@ class CryptoHandler:
                     # Load the server handshake response certificate
                     Server_hs_cert = x509.load_der_x509_certificate(der_cert, default_backend())
                     #append the server hs certs into a list
-                    server_certs.append(x509.load_der_x509_certificate(der_cert, default_backend()))
+                    server_certs_from_hs.append(x509.load_der_x509_certificate(der_cert, default_backend()))
 
                     found_match = False
                     # Load the list of included root CAs
@@ -232,16 +232,16 @@ class CryptoHandler:
                     root_ca_cert = x509.load_pem_x509_certificate(root_cert_pem, default_backend())
 
                     # Check if the certificate chain is valid and find the server's certificate, based on testcase it only has 3??
-                    if server_certs:
+                    if server_certs_from_hs:
                         # Get the issuer of the 1st certificate in the chain (the root CA)
-                        root_issuer = server_certs[0].issuer
+                        root_issuer = server_certs_from_hs[0].issuer
 
-                        if len(server_certs) > 1 and server_certs[1].subject == root_issuer:
+                        if len(server_certs_from_hs) > 1 and server_certs_from_hs[1].subject == root_issuer:
                             # The first certificate in the chain is the server's certificate
                             server_cert_index = 0
                         else:
                             # Check if the subject of the second last certificate in the chain matches the issuer of the last certificate
-                            if len(server_certs) > 1 and server_certs[-2].subject == server_certs[-1].issuer:
+                            if len(server_certs_from_hs) > 1 and server_certs_from_hs[-2].subject == server_certs_from_hs[-1].issuer:
                                 # The last certificate in the chain is the server's certificate
                                 server_cert_index = -1
                             else:
@@ -252,24 +252,37 @@ class CryptoHandler:
                         # Verify the certificate chain and signature of each certificate
                         # Check if the subject of the 2nd certificate in the chain matches the issuer of the 1st certificate
                         ccv_found_match = False
-                        # current cert is the server's
-                        current_cert = server_certs[server_cert_index]
-                        for server_cert in server_certs[server_cert_index + 1:]:
-                            if current_cert.issuer != server_cert.subject:
+                        # current cert is the server's, typically index 0
+                        identified_server_cert = server_certs_from_hs[server_cert_index]
+                        for server_cert in server_certs_from_hs[server_cert_index + 1:]:
+                            if identified_server_cert.issuer != server_cert.subject:
                                 print("Certificate chain is invalid: issuer and subject do not match")
                                 break
+
+                            # after we pass 1st issuer == 2nd subject in the cert
                             # verify() method of the PublicKey object takes the signature of the certificate, the bytes of the certificate's to-be-signed portion,
                             # the padding algorithm used for the signature, and the signature hash algorithm as arguments.
+                            # from debug results,  the signature_algorithm_oid is <ObjectIdentifier(oid=1.2.840.113549.1.1.11, name=sha256WithRSAEncryption)>, the padding scheme used is PKCS1v15 is correct
+                            if server_cert.signature_algorithm_oid in (
+                                    x509.SignatureAlgorithmOID.RSA_WITH_SHA256,
+                                    x509.SignatureAlgorithmOID.RSA_WITH_SHA384,
+                                    x509.SignatureAlgorithmOID.RSA_WITH_SHA512,
+                            ):
+                                padding_scheme = padding.PKCS1v15()
+                            else:
+                                raise ValueError(f"Unsupported signature algorithm")
+
+                            # verify() method of the PublicKey object associated with the server_cert to verify the signature of the current_cert. NOT WORKING PROPERLY!
                             if not server_cert.public_key().verify(
-                                    current_cert.signature,
-                                    current_cert.tbs_certificate_bytes,
-                                    padding.PKCS1v15(),
-                                    current_cert.signature_hash_algorithm,
+                                    identified_server_cert.signature,
+                                    identified_server_cert.tbs_certificate_bytes,
+                                    padding_scheme,
+                                    identified_server_cert.signature_hash_algorithm,
                             ):
                                 print("Certificate chain is invalid: signature is not valid")
                                 break
 
-                            current_cert = server_cert
+                            #current_cert = server_cert
 
                             # Verify against trusted root CA, has issues on signature verification
                             if server_cert.issuer == root_ca_cert.subject:
