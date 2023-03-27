@@ -172,25 +172,28 @@ def main():
             print("Completed handshake\n\n")
             crypto.calculate_application_secrets()
             crypto.print_secrets()
-            get_request = create_get_string()
+            get_request = create_get_string(args.hostname)
             tlsct = crypto.encrypt_message(get_request)
             s.sendall(tlsct.to_bytes())
-            res = recvall(s, 999999999)
+            print("Sent get request")
+            res = recvall(s, -1)
             text = crypto.decrypt_application_bytes(res)
             klfgen.generate_klf(crypto)
+            s.close()
+            print("Completed connection to host:",args.hostname, "at", ip)
         except socket.gaierror:
             # this means could not resolve the host
             print(f"Could not find host {args.hostname}")
     return
 
 
-def create_get_string():
-    return (
+def create_get_string(hostname: str):
+    return ( 
         "GET / HTTP/1.1\r\n"
-        "User-Agent: Eric/1.2\r\n"
-        "Host: google.com\r\n"
+        "User-Agent: Eric/1.3\r\n"
+        f"Host: {hostname}\r\n"
         "Accept-Language: en-us\r\n"
-        "Accept-Encoding: gzip, deflate\r\n"
+        "Accept-Encoding: identity\r\n"
         "Connection: Keep-Alive\r\n"
         "\r\n"
         )
@@ -199,9 +202,13 @@ def recvall(sock:socket.socket, n):
     # Helper function to recv n bytes until timeout
     sock.settimeout(1)
     data = bytearray()
-    while len(data) < n:
+    while len(data) < n or n == -1:
         try:
-            packet = sock.recv(n - len(data))
+            if n == -1:
+                size = 4096
+            else:
+                size = n - len(data)
+            packet = sock.recv(size)
             if not packet:
                 return bytes(data)
             data.extend(packet)

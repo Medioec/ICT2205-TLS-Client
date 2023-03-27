@@ -7,7 +7,6 @@ from cryptography import x509
 from cryptography.x509.extensions import AuthorityKeyIdentifier
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
-import base64
 import re
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from models.ECDH import *
@@ -17,7 +16,7 @@ from cryptography.hazmat.primitives.asymmetric import padding
 class CryptoHandler:
     key_share_entry: tls.KeyShareEntry = None
     cipher_suite: int = None
-    hashlib_algo: None  # hashlib hash function
+    hashlib_algo = None  # hashlib hash function
     hash_length: int
     traffic_key_length: int
     traffic_iv_length: int
@@ -36,7 +35,6 @@ class CryptoHandler:
     # verification as per 4.4
     client_handshake_context: bytes
     server_handshake_context: bytes
-    full_handshake_bytes: bytes
 
     client_handshake_write_key: bytes
     client_handshake_write_iv: bytes
@@ -53,7 +51,7 @@ class CryptoHandler:
 
     def xor(self, b1: bytes, b2: bytes):
         return bytes(a ^ b for a, b in zip(b1, b2))
-    
+
     def init_sequence_number(self):
         self.server_sequence_number = self.client_sequence_number = 0
 
@@ -78,7 +76,8 @@ class CryptoHandler:
         additional_data = tls.ContentType.application_data.to_bytes(
             1, "big") + b"\x03\x03" + enc_length.to_bytes(2, "big")
         nonce = self.get_next_client_nonce(self.client_application_write_iv)
-        enc_bytes = self.encrypt_bytes(tlsinnerbytes, additional_data, self.client_application_write_key, nonce)
+        enc_bytes = self.encrypt_bytes(
+            tlsinnerbytes, additional_data, self.client_application_write_key, nonce)
         tlsct = tls.TLSCiphertext(
             tls.ContentType.application_data, tls.TLS12_PROTOCOL_VERSION, enc_length, enc_bytes)
         return tlsct
@@ -88,7 +87,8 @@ class CryptoHandler:
         nonce = self.get_next_server_nonce(self.server_application_write_iv)
         additional_data = tlsct.type.to_bytes(
             1, "big") + tlsct.legacy_record_version.to_bytes(2, "big") + tlsct.length.to_bytes(2, "big")
-        decrypted = self.decrypt_bytes(enc_bytes, additional_data, self.server_application_write_key, nonce)
+        decrypted = self.decrypt_bytes(
+            enc_bytes, additional_data, self.server_application_write_key, nonce)
         return decrypted
 
     def decrypt_application_bytes(self, raw_bytes: bytes) -> str:
@@ -101,9 +101,10 @@ class CryptoHandler:
         for data in decrypted:
             try:
                 text += data.decode()
-            except Exception:
-                print("\n\nNon-text data: " + data.hex() + "\n\n")
-        print("Text:\n" + text)
+            except:
+                print("Non-text data:\n" + data.hex() + "\n")
+        print("Text data:\n" + text)
+        print(f"Total Application TLS records received: {len(decrypted)}")
         return text
 
 
@@ -115,7 +116,8 @@ class CryptoHandler:
         nonce = self.get_next_server_nonce(self.server_handshake_write_iv)
         additional_data = tlsct.type.to_bytes(
             1, "big") + tlsct.legacy_record_version.to_bytes(2, "big") + tlsct.length.to_bytes(2, "big")
-        decrypted = self.decrypt_bytes(encbytes, additional_data, self.server_handshake_write_key, nonce)
+        decrypted = self.decrypt_bytes(
+            encbytes, additional_data, self.server_handshake_write_key, nonce)
         tlsinner = tls.TLSInnerPlaintext.from_bytes(decrypted)
 
         hslist = tlsinner.parse_encrypted_handshake()
@@ -129,9 +131,7 @@ class CryptoHandler:
                 print("Cert found")
                 cert = hs.to_bytes()
 
-
                 print("\n\nCert is confirm in here somewhere \n\n")
-
 
                 certItSelf = hs.data
 
@@ -140,20 +140,23 @@ class CryptoHandler:
                 elif int.from_bytes(certItSelf[0:1], "big") == 2:
                     print("This shit is RawPublicKey")
 
-                TotalSize = int.from_bytes(certItSelf[1:4], "big") # calculate size of cert
-                
-                print ("Total Size of cert is: ")
+                # calculate size of cert
+                TotalSize = int.from_bytes(certItSelf[1:4], "big")
+
+                print("Total Size of cert is: ")
                 print(TotalSize)
-                iteratorFront = 4 
+                iteratorFront = 4
                 iteratorBack = 7
                 root_ca_certs  = []
                 while iteratorBack <= TotalSize + 4:
-                    #this part handles data
+                    # this part handles data
                     print("Size of sector")
-                    print (certItSelf[iteratorFront:iteratorBack].hex()) # this print size of data
-                    certCalInt = int.from_bytes(certItSelf[iteratorFront:iteratorBack], "big")
+                    # this print size of data
+                    print(certItSelf[iteratorFront:iteratorBack].hex())
+                    certCalInt = int.from_bytes(
+                        certItSelf[iteratorFront:iteratorBack], "big")
                     print("Size of sector in int")
-                    print (certCalInt) # this print the size of data in int
+                    print(certCalInt)  # this print the size of data in int
                     iteratorFront = iteratorBack
                     iteratorBack = iteratorBack + certCalInt
                     print("Data of sector")
@@ -172,7 +175,8 @@ class CryptoHandler:
                     with open("IncludedRootsPEM.txt", "rb") as f:
                         root_ca_pem = f.read()
                         regex_pattern = b"-----BEGIN CERTIFICATE-----\r?\n(.*?)\r?\n-----END CERTIFICATE-----"
-                        matches = re.findall(regex_pattern, root_ca_pem, re.DOTALL)
+                        matches = re.findall(
+                            regex_pattern, root_ca_pem, re.DOTALL)
 
                         # Decoding the certificates and creating a list of certificates in PEM format
                         root_ca_certs  = [b"-----BEGIN CERTIFICATE-----\n" + match + b"\n-----END CERTIFICATE-----" for match in matches]
@@ -197,23 +201,26 @@ class CryptoHandler:
                         print("The server's certificate is not signed by a trusted root CA.")
 
 
-                    #this part handles ext
+                    # this part handles ext
                     iteratorFront = iteratorBack
                     iteratorBack = iteratorBack + 2
                     print("Size of extensions")
-                    print (certItSelf[iteratorFront:iteratorBack].hex()) # this print size of ext
-                    certCalInt = int.from_bytes(certItSelf[iteratorFront:iteratorBack], "big") 
+                    # this print size of ext
+                    print(certItSelf[iteratorFront:iteratorBack].hex())
+                    certCalInt = int.from_bytes(
+                        certItSelf[iteratorFront:iteratorBack], "big")
                     print("Size of extensions in int")
-                    print (certCalInt) # this print the size of ext in int
+                    print(certCalInt)  # this print the size of ext in int
                     iteratorFront = iteratorBack
                     iteratorBack = iteratorBack + certCalInt
                     print("Data of extensions")
-                    print (certItSelf[iteratorFront:iteratorBack].hex()) # this print ext itself
-              
+                    # this print ext itself
+                    print(certItSelf[iteratorFront:iteratorBack].hex())
 
-                    #set up for next loop
+                    # set up for next loop
                     iteratorFront = iteratorBack
                     iteratorBack = iteratorBack + 3
+
                 print("\n\nCert is confirm up there somewhere \n\n")
 
                 # Done
@@ -278,6 +285,11 @@ class CryptoHandler:
                         print("Server's certificate is not signed by a trusted root CA")
 
 
+
+
+                print("\n\nCert is confirm up there somewhere \n\n")
+
+
             elif hs.msg_type == 15:
                 # we do certificate chain verification here
                 print("Cert verify found")
@@ -293,6 +305,7 @@ class CryptoHandler:
             elif hs.msg_type == 20:
                 print("Finished found")
                 finished = hs.to_bytes()
+                finished_hs = hs
         self.client_handshake_context += enc_ext + cert + certverify + finished
         self.server_handshake_context += enc_ext + cert + certverify
         # Calculate verify_data as per 4.4.4
@@ -332,7 +345,7 @@ class CryptoHandler:
 
     def encrypt_bytes(self, data: bytes, additional_data: bytes, key: bytes, nonce: bytes):
         return AESGCM(key).encrypt(nonce, data, additional_data)
-    
+
     def decrypt_bytes(self, data: bytes, additional_data: bytes, key: bytes, nonce: bytes):
         return AESGCM(key).decrypt(nonce, data, additional_data)
 
@@ -385,8 +398,8 @@ class CryptoHandler:
             self.server_application_traffic_secret, "iv", b"", self.traffic_iv_length
         )
 
-    def gen_0_bytes(self) -> bytearray:
-        return bytearray(self.hash_length)
+    def gen_0_bytes(self) -> bytes:
+        return bytes(self.hash_length)
 
     def set_cipher_suite(self, cipher_suite: int):
         sha256_ciphers = (
@@ -460,4 +473,3 @@ class CryptoHandler:
             f"{'Server app key: ':20} {self.server_application_write_key.hex()}\n"
             f"{'Server app iv: ':20} {self.server_application_write_iv.hex()}\n"
         )
-
