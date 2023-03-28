@@ -1,6 +1,9 @@
+import ssl
+
 import cryptography
 import requests as requests
-
+from cryptography.hazmat._oid import NameOID
+import argparse
 import tls
 import hkdf
 import hashlib
@@ -12,10 +15,10 @@ from cryptography.hazmat.primitives import serialization
 import re
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from models.ECDH import *
-from cryptography.hazmat.primitives.asymmetric import rsa, dsa, ec
+
 from cryptography.hazmat.primitives.asymmetric import padding
 from datetime import datetime
-
+import socket
 
 class CryptoHandler:
     key_share_entry: tls.KeyShareEntry = None
@@ -416,10 +419,25 @@ def certificate_verify(certItSelf):
             if len(server_certs_from_hs) > 1 and server_certs_from_hs[-2].subject == server_certs_from_hs[-1].issuer:
                 # The last certificate in the chain is the server's certificate
                 server_certs_from_hs = server_certs_from_hs.reverse()
+                server_cert_index = 0
             else:
                 # The certificate chain is invalid
                 print("Certificate chain is invalid: issuer and subject do not match")
                 return None
+        # parser = argparse.ArgumentParser()
+        # args = parser.parse_args()
+        hostname = "google.com"
+        context = ssl.create_default_context()
+
+        with socket.create_connection((hostname, 443)) as sock:
+            with context.wrap_socket(sock, server_hostname=hostname) as ssock:
+                cert = ssock.getpeercert()
+                try:
+                    ssl.match_hostname(cert, hostname)
+                    print(f"Hostname {hostname} matched certificate\n")
+                except ssl.CertificateError:
+                    print("Hostname did not match certificate")
+
         #  check for certificate expiration &  whether certificate is revoked
         for scfh in server_certs_from_hs:
             crl_distribution_points = scfh.extensions.get_extension_for_class(x509.CRLDistributionPoints).value
@@ -442,6 +460,7 @@ def certificate_verify(certItSelf):
                 if revoked_cert is not None:
                     print(f"Certificate {scfh.subject.rfc4514_string()} is revoked.")
                     ccv_found_match = False
+                    break
                 else:
                     print(f"Certificate {scfh.subject.rfc4514_string()} is not revoked.")
 
@@ -497,3 +516,6 @@ def certificate_verify(certItSelf):
         print("Server's certificate is not signed by a trusted root CA")
     elif ccv_found_match:
         print(f"Certificate chain verification complete, Server's certificate is signed by a trusted root CA: {root_ca_cert.subject.rfc4514_string()}\n")
+def handle_crypto(hostname, port):
+    # your code here
+    return hostname, port
